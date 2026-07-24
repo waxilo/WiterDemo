@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { onMounted, onUnmounted, ref, watch } from "vue";
 import type { ChapterSummary } from "../types/chapter";
+
+const MOBILE_BREAKPOINT = "(max-width: 760px)";
 
 const props = defineProps<{
   chapters: ChapterSummary[];
@@ -19,7 +21,8 @@ const emit = defineEmits<{
 const items = ref<ChapterSummary[]>([...props.chapters]);
 const dragIndex = ref<number | null>(null);
 const overIndex = ref<number | null>(null);
-const isCollapsed = ref(false);
+const mobileQuery = window.matchMedia(MOBILE_BREAKPOINT);
+const isCollapsed = ref(mobileQuery.matches);
 
 watch(
   () => props.chapters,
@@ -63,6 +66,18 @@ function onDragEnd() {
   finishDrag();
 }
 
+function onSelect(id: number) {
+  emit("select", id);
+  if (mobileQuery.matches) isCollapsed.value = true;
+}
+
+function onViewportChange(event: MediaQueryListEvent) {
+  isCollapsed.value = event.matches;
+}
+
+onMounted(() => mobileQuery.addEventListener("change", onViewportChange));
+onUnmounted(() => mobileQuery.removeEventListener("change", onViewportChange));
+
 function finishDrag() {
   if (dragIndex.value === null) return;
   dragIndex.value = null;
@@ -77,95 +92,102 @@ function finishDrag() {
 </script>
 
 <template>
+  <button
+    v-if="!isCollapsed"
+    class="sidebar-backdrop"
+    aria-label="关闭章节栏"
+    @click="isCollapsed = true"
+  ></button>
+
   <aside class="sidebar" :class="{ collapsed: isCollapsed }">
-    <div class="head">
-      <span v-if="!isCollapsed" class="label">章节</span>
-      <div class="head-actions">
-        <button
-          v-if="!isCollapsed"
-          class="add"
-          title="新建章节"
-          @click="emit('create')"
-        >
-          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-            <path
-              d="M12 5v14M5 12h14"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-            />
-          </svg>
-        </button>
-        <button
-          class="collapse"
-          :title="isCollapsed ? '展开章节栏' : '收起章节栏'"
-          :aria-label="isCollapsed ? '展开章节栏' : '收起章节栏'"
-          :aria-expanded="!isCollapsed"
-          @click="isCollapsed = !isCollapsed"
-        >
-          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-            <path
-              d="M15 18l-6-6 6-6"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-          </svg>
-        </button>
+      <div class="head">
+        <span v-if="!isCollapsed" class="label">章节</span>
+        <div class="head-actions">
+          <button
+            v-if="!isCollapsed"
+            class="add"
+            title="新建章节"
+            @click="emit('create')"
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+              <path
+                d="M12 5v14M5 12h14"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+              />
+            </svg>
+          </button>
+          <button
+            class="collapse"
+            :title="isCollapsed ? '展开章节栏' : '收起章节栏'"
+            :aria-label="isCollapsed ? '展开章节栏' : '收起章节栏'"
+            :aria-expanded="!isCollapsed"
+            @click="isCollapsed = !isCollapsed"
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+              <path
+                d="M15 18l-6-6 6-6"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+        </div>
       </div>
-    </div>
 
-    <p v-if="!isCollapsed && !loading && items.length === 0" class="empty">
-      还没有章节，点击右上角 + 新建
-    </p>
+      <p v-if="!isCollapsed && !loading && items.length === 0" class="empty">
+        还没有章节，点击右上角 + 新建
+      </p>
 
-    <nav v-if="!isCollapsed" class="items">
-      <div
-        v-for="(ch, index) in items"
-        :key="ch.id"
-        class="item"
-        :class="{
-          active: ch.id === currentId,
-          dragging: dragIndex === index,
-        }"
-        draggable="true"
-        @click="emit('select', ch.id)"
-        @dragstart="onDragStart(index, $event)"
-        @dragover="onDragOver(index, $event)"
-        @drop="onDrop"
-        @dragend="onDragEnd"
-      >
-        <span class="grip" title="拖动排序" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="14" height="14">
-            <circle cx="9" cy="6" r="1.4" fill="currentColor" />
-            <circle cx="15" cy="6" r="1.4" fill="currentColor" />
-            <circle cx="9" cy="12" r="1.4" fill="currentColor" />
-            <circle cx="15" cy="12" r="1.4" fill="currentColor" />
-            <circle cx="9" cy="18" r="1.4" fill="currentColor" />
-            <circle cx="15" cy="18" r="1.4" fill="currentColor" />
-          </svg>
-        </span>
-        <span class="name">{{ ch.title || "未命名章节" }}</span>
-        <span class="del" title="删除章节" @click.stop="emit('remove', ch.id)">
-          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
-            <path
-              d="M6 6l12 12M18 6L6 18"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-            />
-          </svg>
-        </span>
+      <nav v-if="!isCollapsed" class="items">
+        <div
+          v-for="(ch, index) in items"
+          :key="ch.id"
+          class="item"
+          :class="{
+            active: ch.id === currentId,
+            dragging: dragIndex === index,
+          }"
+          draggable="true"
+          @click="onSelect(ch.id)"
+          @dragstart="onDragStart(index, $event)"
+          @dragover="onDragOver(index, $event)"
+          @drop="onDrop"
+          @dragend="onDragEnd"
+        >
+          <span class="grip" title="拖动排序" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="14" height="14">
+              <circle cx="9" cy="6" r="1.4" fill="currentColor" />
+              <circle cx="15" cy="6" r="1.4" fill="currentColor" />
+              <circle cx="9" cy="12" r="1.4" fill="currentColor" />
+              <circle cx="15" cy="12" r="1.4" fill="currentColor" />
+              <circle cx="9" cy="18" r="1.4" fill="currentColor" />
+              <circle cx="15" cy="18" r="1.4" fill="currentColor" />
+            </svg>
+          </span>
+          <span class="name">{{ ch.title || "未命名章节" }}</span>
+          <span class="del" title="删除章节" @click.stop="emit('remove', ch.id)">
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+              <path
+                d="M6 6l12 12M18 6L6 18"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+              />
+            </svg>
+          </span>
+        </div>
+      </nav>
+
+      <div v-if="!isCollapsed && loading" class="loading">
+        <span class="spinner"></span>
       </div>
-    </nav>
-
-    <div v-if="!isCollapsed && loading" class="loading">
-      <span class="spinner"></span>
-    </div>
   </aside>
 </template>
 
@@ -185,6 +207,10 @@ function finishDrag() {
 
 .sidebar.collapsed {
   width: 48px;
+}
+
+.sidebar-backdrop {
+  display: none;
 }
 
 .head {
@@ -385,6 +411,74 @@ function finishDrag() {
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 760px) {
+  .sidebar {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 40;
+    width: min(82vw, 300px);
+    max-width: none;
+    box-shadow: 10px 0 30px rgba(0, 0, 0, 0.12);
+    transition: width 0.24s ease, box-shadow 0.24s ease;
+  }
+
+  .sidebar.collapsed {
+    width: 0;
+    overflow: visible;
+    border-right: none;
+    box-shadow: none;
+  }
+
+  .collapsed .head {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    width: 36px;
+    padding: 0;
+  }
+
+  .collapse {
+    width: 36px;
+    height: 36px;
+    background: rgba(250, 248, 243, 0.94);
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.08);
+  }
+
+  .sidebar:not(.collapsed) .collapse {
+    width: 32px;
+    height: 32px;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .sidebar-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: 35;
+    display: block;
+    padding: 0;
+    background: rgba(32, 30, 26, 0.18);
+    border: none;
+  }
+
+  .head {
+    padding: 1rem 1rem 0.7rem;
+  }
+
+  .items {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+
+  .item {
+    height: 48px;
+  }
+
+  .grip,
+  .del {
+    opacity: 1;
   }
 }
 </style>

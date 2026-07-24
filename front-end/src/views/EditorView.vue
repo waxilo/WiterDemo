@@ -163,8 +163,14 @@ function onReorder(ids: number[]) {
 
       <div class="bar-right">
         <Transition name="fade">
-          <span v-if="saveStatus" class="status" :class="saveStatus.cls">
-            <span class="dot"></span>{{ saveStatus.text }}
+          <span
+            v-if="saveStatus"
+            class="status"
+            :class="saveStatus.cls"
+            :title="saveStatus.text"
+          >
+            <span class="dot"></span>
+            <span class="status-text">{{ saveStatus.text }}</span>
           </span>
         </Transition>
 
@@ -224,9 +230,11 @@ function onReorder(ids: number[]) {
 <style scoped>
 .workspace {
   height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   background: #f5f3ee;
+  overflow: hidden;
 }
 
 /* ---- top bar ---- */
@@ -246,6 +254,7 @@ function onReorder(ids: number[]) {
 
 .bar-left {
   justify-self: start;
+  min-width: 0;
 }
 
 .bar-center {
@@ -256,6 +265,7 @@ function onReorder(ids: number[]) {
 
 .bar-right {
   justify-self: end;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 0.9rem;
@@ -304,6 +314,8 @@ function onReorder(ids: number[]) {
 }
 
 .book-title-input {
+  box-sizing: border-box;
+  width: 100%;
   font-size: 18px;
   font-weight: 600;
   color: #2a2a2a;
@@ -472,8 +484,78 @@ function onReorder(ids: number[]) {
 
 /* ---- body ---- */
 .panes {
+  position: relative;
   flex: 1;
   display: flex;
+  min-width: 0;
   min-height: 0;
+  overflow: hidden;
+}
+
+@media (max-width: 760px) {
+  .topbar {
+    height: 56px;
+    grid-template-columns: 44px minmax(0, 1fr) 52px;
+    padding: 0 8px;
+  }
+
+  .bar-center {
+    width: 100%;
+    max-width: none;
+  }
+
+  .bar-right {
+    gap: 0;
+  }
+
+  .back {
+    width: 40px;
+    height: 40px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .back span,
+  .status-text,
+  .uname,
+  .chevron {
+    display: none;
+  }
+
+  .book-title {
+    max-width: 100%;
+    padding-inline: 0.35em;
+    font-size: 16px;
+    text-align: center;
+  }
+
+  .book-title-input {
+    min-width: 0;
+    font-size: 16px;
+  }
+
+  .status {
+    margin-right: 6px;
+  }
+
+  .status .dot {
+    width: 7px;
+    height: 7px;
+  }
+
+  .user-trigger {
+    padding: 4px;
+  }
+
+  .avatar {
+    width: 32px;
+    height: 32px;
+  }
+
+  .menu {
+    position: fixed;
+    top: 62px;
+    right: 8px;
+  }
 }
 </style>

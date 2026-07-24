@@ -176,7 +176,46 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 24px;
+  text-align: center;
   color: #b6b0a1;
   font-size: 0.95rem;
+}
+
+@media (max-width: 760px) {
+  .desk {
+    padding: 8px 8px 0;
+  }
+
+  .paper {
+    --line: 32px;
+    max-width: none;
+    padding: 28px 18px 56px;
+    border-radius: 10px 10px 0 0;
+    font-size: 16px;
+    text-align: left;
+    background-image:
+      linear-gradient(
+        to right,
+        transparent 0 11px,
+        rgba(255, 120, 120, 0.14) 11px 12px,
+        transparent 12px
+      ),
+      repeating-linear-gradient(
+        to bottom,
+        transparent 0 31px,
+        rgba(120, 120, 120, 0.1) 31px 32px
+      ),
+      linear-gradient(#fffdf8, #fffdf8);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.05);
+  }
+
+  .paper::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .paper::-webkit-scrollbar-thumb {
+    border-width: 1px;
+  }
 }
 </style>
