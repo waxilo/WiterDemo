@@ -19,6 +19,7 @@ const emit = defineEmits<{
 const items = ref<ChapterSummary[]>([...props.chapters]);
 const dragIndex = ref<number | null>(null);
 const overIndex = ref<number | null>(null);
+const isCollapsed = ref(false);
 
 watch(
   () => props.chapters,
@@ -76,27 +77,52 @@ function finishDrag() {
 </script>
 
 <template>
-  <aside class="sidebar">
+  <aside class="sidebar" :class="{ collapsed: isCollapsed }">
     <div class="head">
-      <span class="label">章节</span>
-      <button class="add" title="新建章节" @click="emit('create')">
-        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-          <path
-            d="M12 5v14M5 12h14"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-          />
-        </svg>
-      </button>
+      <span v-if="!isCollapsed" class="label">章节</span>
+      <div class="head-actions">
+        <button
+          v-if="!isCollapsed"
+          class="add"
+          title="新建章节"
+          @click="emit('create')"
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <path
+              d="M12 5v14M5 12h14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+            />
+          </svg>
+        </button>
+        <button
+          class="collapse"
+          :title="isCollapsed ? '展开章节栏' : '收起章节栏'"
+          :aria-label="isCollapsed ? '展开章节栏' : '收起章节栏'"
+          :aria-expanded="!isCollapsed"
+          @click="isCollapsed = !isCollapsed"
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <path
+              d="M15 18l-6-6 6-6"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
+      </div>
     </div>
 
-    <p v-if="!loading && items.length === 0" class="empty">
+    <p v-if="!isCollapsed && !loading && items.length === 0" class="empty">
       还没有章节，点击右上角 + 新建
     </p>
 
-    <nav class="items">
+    <nav v-if="!isCollapsed" class="items">
       <div
         v-for="(ch, index) in items"
         :key="ch.id"
@@ -137,7 +163,7 @@ function finishDrag() {
       </div>
     </nav>
 
-    <div v-if="loading" class="loading">
+    <div v-if="!isCollapsed && loading" class="loading">
       <span class="spinner"></span>
     </div>
   </aside>
@@ -152,7 +178,13 @@ function finishDrag() {
   flex-direction: column;
   background: #faf8f3;
   border-right: 1px solid rgba(0, 0, 0, 0.06);
+  overflow-x: hidden;
   overflow-y: auto;
+  transition: width 0.24s ease;
+}
+
+.sidebar.collapsed {
+  width: 48px;
 }
 
 .head {
@@ -160,6 +192,17 @@ function finishDrag() {
   align-items: center;
   justify-content: space-between;
   padding: 1.15rem 1.15rem 0.7rem;
+}
+
+.collapsed .head {
+  justify-content: center;
+  padding: 1.15rem 0 0.7rem;
+}
+
+.head-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
 .label {
@@ -190,6 +233,29 @@ function finishDrag() {
 
 .add:active {
   transform: scale(0.9);
+}
+
+.collapse {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  color: #8a8577;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, transform 0.24s ease;
+}
+
+.collapse:hover {
+  color: #444;
+  background: #f0efea;
+}
+
+.collapsed .collapse {
+  transform: rotate(180deg);
 }
 
 .empty {
