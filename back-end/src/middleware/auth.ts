@@ -1,40 +1,27 @@
 import { checkToken } from "../utils/token";
+import type { Ctx } from "../context";
 
+export interface AuthResult {
+  success: boolean;
+  message?: string;
+  userId?: number;
+}
 
-export async function checkAuth(request, env) {
-
-  const header = request.headers.get("Authorization");
-
-
+/**
+ * Stateless auth check: verify the Bearer token's signature and expiry, and
+ * return the embedded user id. No database access.
+ */
+export async function checkAuth(ctx: Ctx): Promise<AuthResult> {
+  const header = ctx.request.headers.get("Authorization");
   if (!header) {
-
-    return {
-      success: false,
-      message: "未登录"
-    };
+    return { success: false, message: "未登录" };
   }
 
-
   const token = header.replace("Bearer ", "");
-
-  const checkResult = checkToken(token);
-
-  if (!checkResult.success) {
+  const result = await checkToken(token, ctx.env);
+  if (!result.success || result.userId === undefined) {
     return { success: false, message: "请重新登录" };
   }
 
-
-  const record = await env.DB.prepare(
-    `
-      select *
-      from t_login_log
-      where uuid=?
-      ` )
-    .bind(checkResult.uuid)
-    .first();
-
-  return {
-    success: true,
-    userId: record.user_id
-  };
+  return { success: true, userId: result.userId };
 }

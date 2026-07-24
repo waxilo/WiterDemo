@@ -1,42 +1,58 @@
 import { login } from "./controller/login";
+import * as bookController from "./controller/book";
+import * as chapterController from "./controller/chapter";
 import { checkAuth } from "./middleware/auth";
+import { jsonResponse } from "./response";
+import type { Ctx } from "./context";
 
+/** Dispatch a request to the matching controller. */
+export async function router(ctx: Ctx): Promise<Response> {
+  const { method } = ctx;
+  const segments = ctx.url.pathname.split("/").filter(Boolean);
 
-export async function router(request, env) {
-
-  const url = new URL(request.url);
-
-  const path = url.pathname;
-  const method = request.method;
-
-
-  // 登录不需要token
-  if (method === "POST" && path === "/login") {
-    return login(
-      request,
-      env
-    );
+  // Login is public.
+  if (method === "POST" && segments.length === 1 && segments[0] === "login") {
+    return login(ctx);
   }
 
-
-  // 其他接口校验token
-  const auth = await checkAuth(request, env);
-
+  // Everything else requires a valid token.
+  const auth = await checkAuth(ctx);
   if (!auth.success) {
+    return jsonResponse(null, 401, auth.message ?? "未登录");
+  }
+  ctx.userId = auth.userId!;
 
-    return Response.json({
-      code: 401,
-      message: auth.message
-    }, {
-      status: 401
-    });
-
+  // /books
+  if (segments.length === 1 && segments[0] === "books") {
+    if (method === "GET") return bookController.listBooks(ctx);
+    if (method === "POST") return bookController.createBook(ctx);
   }
 
+  // /books/:id
+  if (segments.length === 2 && segments[0] === "books") {
+    ctx.params.id = segments[1];
+    if (method === "PUT") return bookController.renameBook(ctx);
+    if (method === "DELETE") return bookController.deleteBook(ctx);
+  }
 
-  return Response.json({
-    code: 404,
-    message: "Not Found API"
-  });
+  // /books/:bookId/chapters
+  if (
+    segments.length === 3 &&
+    segments[0] === "books" &&
+    segments[2] === "chapters"
+  ) {
+    ctx.params.bookId = segments[1];
+    if (method === "GET") return chapterController.listChapters(ctx);
+    if (method === "POST") return chapterController.createChapter(ctx);
+  }
 
+  // /chapters/:id
+  if (segments.length === 2 && segments[0] === "chapters") {
+    ctx.params.id = segments[1];
+    if (method === "GET") return chapterController.getChapter(ctx);
+    if (method === "PUT") return chapterController.saveChapter(ctx);
+    if (method === "DELETE") return chapterController.deleteChapter(ctx);
+  }
+
+  return jsonResponse(null, 404, "Not Found API");
 }

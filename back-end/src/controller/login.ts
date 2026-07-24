@@ -1,12 +1,14 @@
 import * as authService from "../service/AuthService";
 import { jsonResponse } from "../response";
+import type { Ctx } from "../context";
 
-export async function login(request, env) {
+interface LoginBody {
+  username: string;
+  password: string;
+}
 
-  const body = await request.json();
-
-  const result = await authService.login(body.username, body.password, env);
-
-  return jsonResponse(result);
-
+export async function login(ctx: Ctx): Promise<Response> {
+  const body = await ctx.json<LoginBody>();
+  const token = await authService.login(body.username, body.password, ctx.env);
+  return jsonResponse(token);
 }
