@@ -50,6 +50,13 @@ export function useBooks() {
     if (currentId.value === id) currentId.value = null;
   }
 
+  /** Rename a book and update it in the local list. */
+  async function rename(id: number, title: string): Promise<void> {
+    const updated = await bookApi.renameBook(id, title);
+    const book = list.value.find((b) => b.id === id);
+    if (book) book.title = updated.title;
+  }
+
   return {
     list,
     current,
@@ -61,5 +68,6 @@ export function useBooks() {
     backToShelf,
     create,
     remove,
+    rename,
   };
 }

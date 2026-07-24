@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, computed } from "vue";
+import { onMounted, computed, ref, nextTick } from "vue";
 import type { useBooks } from "../composables/useBooks";
 import type { useChapters } from "../composables/useChapters";
 import ChapterList from "../components/ChapterList.vue";
@@ -13,6 +13,31 @@ const emit = defineEmits<{ (e: "logout"): void }>();
 
 const bookId = computed(() => props.books.currentId.value);
 const bookTitle = computed(() => props.books.current.value?.title ?? "");
+
+const editingTitle = ref(false);
+const titleDraft = ref("");
+const titleInput = ref<HTMLInputElement | null>(null);
+
+function startEditTitle() {
+  titleDraft.value = bookTitle.value;
+  editingTitle.value = true;
+  void nextTick(() => {
+    titleInput.value?.focus();
+    titleInput.value?.select();
+  });
+}
+
+async function saveTitle() {
+  if (!editingTitle.value) return;
+  editingTitle.value = false;
+  const next = titleDraft.value.trim();
+  if (bookId.value === null || !next || next === bookTitle.value) return;
+  await props.books.rename(bookId.value, next);
+}
+
+function cancelEditTitle() {
+  editingTitle.value = false;
+}
 
 const { list, current, loading, select, create, remove, flush } =
   props.chapters;
@@ -43,7 +68,22 @@ async function onRemove(id: number) {
   <div class="workspace">
     <header class="topbar">
       <button class="back" @click="onBack">← 返回书架</button>
-      <span class="book-title">{{ bookTitle }}</span>
+      <input
+        v-if="editingTitle"
+        ref="titleInput"
+        v-model="titleDraft"
+        class="book-title-input"
+        @keyup.enter="saveTitle"
+        @keyup.esc="cancelEditTitle"
+        @blur="saveTitle"
+      />
+      <span
+        v-else
+        class="book-title"
+        title="双击修改书名"
+        @dblclick="startEditTitle"
+        >{{ bookTitle }}</span
+      >
       <button class="logout" @click="emit('logout')">退出登录</button>
     </header>
 
@@ -97,6 +137,19 @@ async function onRemove(id: number) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: text;
+}
+
+.book-title-input {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  font-size: 1em;
+  color: #1a1a1a;
+  padding: 0.2em 0.4em;
+  border: 1px solid #4f7cff;
+  border-radius: 6px;
+  outline: none;
 }
 
 .logout {

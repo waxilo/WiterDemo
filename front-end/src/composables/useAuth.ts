@@ -7,8 +7,8 @@ import { tokenRef, setToken, clearToken } from "../api/tokenStore";
  * (localStorage), so the session survives reloads and a 401 can force logout.
  */
 export function useAuth() {
-  const username = ref("admin");
-  const password = ref("123456");
+  const username = ref("");
+  const password = ref("");
   const loading = ref(false);
   const error = ref("");
   const token = tokenRef();
