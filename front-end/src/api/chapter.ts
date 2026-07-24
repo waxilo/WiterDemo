@@ -33,3 +33,14 @@ export function saveChapter(
 export function deleteChapter(id: number): Promise<{ id: number }> {
   return request<{ id: number }>(`/chapters/${id}`, { method: "DELETE" });
 }
+
+/** Persist a new chapter order (array of chapter ids in the desired order). */
+export function reorderChapters(
+  bookId: number,
+  ids: number[]
+): Promise<ChapterSummary[]> {
+  return request<ChapterSummary[]>(`/books/${bookId}/chapters`, {
+    method: "PUT",
+    body: { ids },
+  });
+}

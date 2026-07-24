@@ -133,6 +133,25 @@ export function useChapters() {
     }
   }
 
+  /**
+   * Persist a new chapter order. Applies the order optimistically to the local
+   * list, then syncs with the server; on failure re-fetches the list.
+   */
+  async function reorder(bookId: number, orderedIds: number[]): Promise<void> {
+    const byId = new Map(list.value.map((c) => [c.id, c]));
+    const next = orderedIds
+      .map((id) => byId.get(id))
+      .filter((c): c is ChapterSummary => c !== undefined);
+    if (next.length === list.value.length) list.value = next;
+
+    try {
+      list.value = await chapterApi.reorderChapters(bookId, orderedIds);
+    } catch (e) {
+      list.value = await chapterApi.listChapters(bookId);
+      throw e;
+    }
+  }
+
   return {
     list,
     current,
@@ -146,5 +165,6 @@ export function useChapters() {
     scheduleAutoSave,
     flush,
     remove,
+    reorder,
   };
 }

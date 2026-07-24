@@ -12,6 +12,10 @@ interface SaveChapterBody {
   hash?: string;
 }
 
+interface ReorderBody {
+  ids: number[];
+}
+
 export async function listChapters(ctx: Ctx): Promise<Response> {
   const chapters = await chapterService.listChapters(
     ctx.env,
@@ -32,6 +36,17 @@ export async function createChapter(ctx: Ctx): Promise<Response> {
     body.title
   );
   return jsonResponse(chapter);
+}
+
+export async function reorderChapters(ctx: Ctx): Promise<Response> {
+  const body = await ctx.json<ReorderBody>();
+  const chapters = await chapterService.reorderChapters(
+    ctx.env,
+    ctx.userId,
+    Number(ctx.params.bookId),
+    Array.isArray(body.ids) ? body.ids.map(Number) : []
+  );
+  return jsonResponse(chapters);
 }
 
 export async function getChapter(ctx: Ctx): Promise<Response> {

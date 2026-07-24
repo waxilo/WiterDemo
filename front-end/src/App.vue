@@ -55,7 +55,13 @@ function onLogout() {
     :username="displayName"
     @logout="onLogout"
   />
-  <EditorView v-else :books="books" :chapters="chapters" @logout="onLogout" />
+  <EditorView
+    v-else
+    :books="books"
+    :chapters="chapters"
+    :username="displayName"
+    @logout="onLogout"
+  />
 </template>
 
 <style>

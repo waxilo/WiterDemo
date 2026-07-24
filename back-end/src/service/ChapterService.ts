@@ -120,6 +120,41 @@ export async function saveChapter(
   return toChapter(updated);
 }
 
+/**
+ * Reorder the chapters of a book to match the given id sequence. Verifies the
+ * user owns the book and that every id belongs to it, then writes each
+ * chapter's sort_order to its index. Returns the reordered list.
+ */
+export async function reorderChapters(
+  env: Env,
+  userId: number,
+  bookId: number,
+  ids: number[]
+): Promise<ChapterSummary[]> {
+  const book = await getOwnedBook(env, userId, bookId);
+  if (!book) throw new Error("无权操作");
+
+  const { results } = await env.DB.prepare(
+    `select id from t_chapter where book_id = ?`
+  )
+    .bind(bookId)
+    .all<{ id: number }>();
+  const owned = new Set(results.map((r) => r.id));
+
+  for (const id of ids) {
+    if (!owned.has(id)) throw new Error("章节不属于该书");
+  }
+
+  const statements = ids.map((id, index) =>
+    env.DB.prepare(
+      `update t_chapter set sort_order = ? where id = ? and book_id = ?`
+    ).bind(index, id, bookId)
+  );
+  if (statements.length) await env.DB.batch(statements);
+
+  return listChapters(env, userId, bookId);
+}
+
 /** Delete a chapter the user owns. */
 export async function deleteChapter(
   env: Env,

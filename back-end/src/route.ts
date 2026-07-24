@@ -57,6 +57,7 @@ export async function router(ctx: Ctx): Promise<Response> {
     ctx.params.bookId = segments[1];
     if (method === "GET") return chapterController.listChapters(ctx);
     if (method === "POST") return chapterController.createChapter(ctx);
+    if (method === "PUT") return chapterController.reorderChapters(ctx);
   }
 
   // /chapters/:id
