@@ -7,7 +7,8 @@
 // module transparently keeps the access token fresh:
 //   - before each request, if the access token is expired/near-expiry, it is
 //     refreshed first (single-flight so concurrent requests share one refresh);
-//   - if a request still comes back 401, one refresh + retry is attempted;
+//   - if a request still comes back 401, one *forced* refresh + retry is attempted
+//     (skips the local expiry check to cover clock skew);
 //   - a proactive timer refreshes shortly before expiry so it happens in the
 //     background, invisible to the user.
 import { API_BASE_URL } from "../config";
@@ -45,6 +46,14 @@ function resolveUrl(path: string): string {
 let refreshPromise: Promise<boolean> | null = null;
 let proactiveTimer: ReturnType<typeof setTimeout> | null = null;
 
+/** Stop any pending proactive refresh timer. */
+export function cancelProactiveRefresh(): void {
+  if (proactiveTimer) {
+    clearTimeout(proactiveTimer);
+    proactiveTimer = null;
+  }
+}
+
 /** Perform the actual /refresh call. Returns true on success. */
 async function doRefresh(): Promise<boolean> {
   const refreshToken = getRefreshToken();
@@ -60,6 +69,7 @@ async function doRefresh(): Promise<boolean> {
     const json: ApiResponse<AuthTokens> = await res.json();
     if (json.code !== 200 || !json.data) {
       // Refresh token rejected/revoked -> force logout.
+      cancelProactiveRefresh();
       clearSession();
       return false;
     }
@@ -73,12 +83,17 @@ async function doRefresh(): Promise<boolean> {
 }
 
 /**
- * Ensure the access token is fresh. Refreshes if expired/near-expiry, sharing a
- * single in-flight refresh across concurrent callers.
+ * Ensure the access token is fresh. Refreshes if expired/near-expiry (or always
+ * when `force` is true), sharing a single in-flight refresh across callers.
+ *
+ * Use `force` on 401 recovery so clock skew / premature server rejection still
+ * triggers a real /refresh instead of reusing a locally-"valid" AT.
  */
-export function ensureFreshToken(): Promise<boolean> {
+export function ensureFreshToken(force = false): Promise<boolean> {
   if (!getRefreshToken()) return Promise.resolve(false);
-  if (Date.now() < getAccessExp() - SKEW_MS) return Promise.resolve(true);
+  if (!force && Date.now() < getAccessExp() - SKEW_MS) {
+    return Promise.resolve(true);
+  }
   if (!refreshPromise) {
     refreshPromise = doRefresh().finally(() => {
       refreshPromise = null;
@@ -87,12 +102,24 @@ export function ensureFreshToken(): Promise<boolean> {
   return refreshPromise;
 }
 
+/** Retry delay after a failed proactive refresh (network blip, etc.). */
+const PROACTIVE_RETRY_MS = 30_000;
+
+function runProactiveRefresh(): void {
+  void ensureFreshToken().then((ok) => {
+    // Success path reschedules inside doRefresh. On transient failure, keep retrying.
+    if (!ok && getRefreshToken()) {
+      proactiveTimer = setTimeout(runProactiveRefresh, PROACTIVE_RETRY_MS);
+    }
+  });
+}
+
 /** (Re)schedule a background refresh to fire shortly before the token expires. */
 export function scheduleProactiveRefresh(): void {
-  if (proactiveTimer) clearTimeout(proactiveTimer);
+  cancelProactiveRefresh();
   if (!getRefreshToken()) return;
   const delay = Math.max(getAccessExp() - Date.now() - SKEW_MS, 0);
-  proactiveTimer = setTimeout(() => void ensureFreshToken(), delay);
+  proactiveTimer = setTimeout(runProactiveRefresh, delay);
 }
 
 // --- request -----------------------------------------------------------------
@@ -136,16 +163,23 @@ export async function request<T>(
   let res = await fetch(url, buildInit(method, body, headers, !skipAuthRefresh));
   let json: ApiResponse<T> = await parse(res);
 
-  // Recovery: access token rejected despite pre-flight (e.g. clock skew).
+  // Recovery: AT rejected despite pre-flight (e.g. clock skew) — force refresh.
   if (json.code === 401 && !skipAuthRefresh) {
-    const ok = await ensureFreshToken();
+    const ok = await ensureFreshToken(true);
     if (ok) {
       res = await fetch(url, buildInit(method, body, headers, true));
       json = await parse(res);
+    } else if (getRefreshToken()) {
+      // Transient /refresh failure (network): keep session, don't kick to login.
+      throw new Error(json.message || "网络异常，请稍后重试");
+    } else {
+      // RT already cleared by doRefresh (rejected/revoked).
+      throw new Error(json.message || "登录已失效，请重新登录");
     }
   }
 
   if (json.code === 401) {
+    cancelProactiveRefresh();
     clearSession();
     throw new Error(json.message || "登录已失效，请重新登录");
   }

@@ -5,7 +5,7 @@ import {
   clearSession,
   getRefreshToken,
 } from "./api/tokenStore";
-import { scheduleProactiveRefresh } from "./api/http";
+import { cancelProactiveRefresh, scheduleProactiveRefresh } from "./api/http";
 import { getMe, logout as logoutApi } from "./api/auth";
 import { useBooks } from "./composables/useBooks";
 import { useChapters } from "./composables/useChapters";
@@ -62,6 +62,7 @@ async function onLogout() {
       // ignore
     }
   }
+  cancelProactiveRefresh();
   clearSession();
 }
 </script>

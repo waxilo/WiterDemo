@@ -10,7 +10,7 @@ import {
   clearSession,
   getRefreshToken,
 } from "../api/tokenStore";
-import { scheduleProactiveRefresh } from "../api/http";
+import { cancelProactiveRefresh, scheduleProactiveRefresh } from "../api/http";
 
 export type AuthMode = "login" | "register";
 
@@ -99,6 +99,7 @@ export function useAuth() {
         // ignore network/revocation errors
       }
     }
+    cancelProactiveRefresh();
     clearSession();
     error.value = "";
   }
