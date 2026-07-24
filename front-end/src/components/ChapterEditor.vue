@@ -1,23 +1,29 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, computed } from "vue";
-import type { ComponentPublicInstance } from "vue";
+import { onMounted, onUnmounted, computed, ref, watch, nextTick } from "vue";
 import type { useChapters } from "../composables/useChapters";
 
 const props = defineProps<{ chapters: ReturnType<typeof useChapters> }>();
 const { current, save, scheduleAutoSave } = props.chapters;
 
+const editorRef = ref<HTMLElement | null>(null);
+
 /** Placeholder shows only when the current chapter has no content. */
 const isEmpty = computed(() => !current.value?.content);
 
 /**
- * Populate the contenteditable when a chapter mounts (keyed by id so switching
- * chapters remounts and replays the fade-in). We set text imperatively rather
- * than binding it, so typing never resets the caret.
+ * Load the chapter text into the contenteditable ONLY when the open chapter
+ * changes. We never write the DOM back during typing, so the caret stays put.
+ * (Setting innerText on every render is what makes the caret jump to the
+ * start.)
  */
-function bindEditor(el: Element | ComponentPublicInstance | null) {
-  const node = el as HTMLElement | null;
-  if (node && current.value) node.innerText = current.value.content;
-}
+watch(
+  () => current.value?.id,
+  async () => {
+    await nextTick();
+    if (editorRef.value) editorRef.value.innerText = current.value?.content ?? "";
+  },
+  { immediate: true }
+);
 
 function onInput(e: Event) {
   if (!current.value) return;
@@ -46,7 +52,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
         data-placeholder="开始写作……"
         contenteditable="plaintext-only"
         spellcheck="false"
-        :ref="bindEditor"
+        ref="editorRef"
         @input="onInput"
       ></article>
     </template>
