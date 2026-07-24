@@ -2,7 +2,7 @@
 
 ## 1. 概述
 
-本文档描述写作助手核心功能的设计：用户登录后进入写作主界面，界面从左到右分为三层——作品列表、章节列表、章节编辑区。用户选择一个作品后查看其下章节，点击某章在右侧编辑，按 Ctrl+S 调用后端接口把章节内容持久化到数据库。
+本文档描述写作助手核心功能的设计：用户登录后先进入**书架**，书架以卡片形式展示其全部作品（书）；点击一本书进入该书的**两段式**编辑页——左侧为章节列表，右侧为章节内容编辑区。点击某章在右侧编辑，按 Ctrl+S 或空闲自动保存把章节内容持久化到数据库。
 
 本设计在现有项目基础上扩展，保持与既有架构、代码风格和 API 约定一致：
 
@@ -12,10 +12,10 @@
 
 ### 目标
 
-- 登录成功后从登录页切换到写作主界面
+- 登录成功后进入书架页，展示当前用户的全部作品（书），支持新建、删除、进入
 - 作品层：一个用户可有多个作品（书），章节归属于作品
-- 左侧作品列表 / 中间章节列表：支持新建、选择、删除
-- 右侧编辑区：编辑选中章节的标题与正文
+- 选择一本书进入两段式编辑页：左侧章节列表（新建、选择、删除），右侧章节内容编辑区
+- 编辑区可返回书架；支持切换到该书的其它章节
 - 保存机制：手动 Ctrl+S + **空闲自动保存**（停止输入一段时间后自动触发），均在保存前用 MD5 判重
 - 所有数据按用户隔离
 
@@ -53,12 +53,13 @@
 
 ```
 ┌─────────────────────────── 前端 (Tauri + Vue 3) ───────────────────────────┐
-│  App.vue ──(token 有无)──▶ LoginView.vue / WorkspaceView.vue                │
-│                                          │                                  │
-│              ┌───────────────┬───────────┴───────────┐                     │
-│              │ WorkList.vue  │ ChapterList.vue │ ChapterEditor.vue │        │
-│              └───────────────┴───────────┬───────────┘                     │
-│  composables: useAuth / useWorks / useChapters                             │
+│  App.vue ─▶ LoginView（无 token）                                          │
+│          └▶ 已登录 ─▶ BookshelfView（书架）──选书──▶ WorkspaceView（两段式） │
+│                                          │              │                   │
+│                                          │      ┌───────┴────────┐          │
+│                                          │      │ ChapterList │ ChapterEditor│
+│                                          │      └───────┬────────┘          │
+│  composables: useAuth / useWorks / useChapters         │                    │
 │  api: tokenStore ◀─ http.ts ◀─ auth.ts / work.ts / chapter.ts             │
 └──────────────────────────────────────────┼────────────────────────────────┘
                                              │ HTTPS  { code, message, data }
@@ -287,48 +288,68 @@ back-end/
 
 ### 6.1 视图切换
 
-不引入 vue-router，`App.vue` 按 token 是否存在条件渲染：
+不引入 vue-router。`App.vue` 维护一个简单的视图状态：token 决定登录/已登录，已登录时再由"是否选中了某本书"决定书架页还是编辑页。
 
 ```
 App.vue
- ├─ 无 token → <LoginView>       （由现有登录卡片重构而来）
- └─ 有 token → <WorkspaceView>   （三栏写作主界面）
+ ├─ 无 token                    → <LoginView>        （由现有登录卡片重构而来）
+ └─ 有 token
+     ├─ 未选书（currentWorkId 空）→ <BookshelfView>    （书架）
+     └─ 已选书                   → <WorkspaceView>    （两段式编辑页）
 ```
 
-### 6.2 主界面布局（三栏）
+选书即设置 `useWorks.currentId`，返回书架即清空它。
+
+### 6.2 书架页布局（BookshelfView）
 
 ```
 ┌───────────────────────────────────────────────────────────┐
 │ 顶栏：应用名 / 当前用户 / 退出登录                            │
-├────────────┬────────────────┬─────────────────────────────┤
-│ WorkList   │ ChapterList     │ ChapterEditor               │
-│ (作品)      │ (当前作品的章节) │ (编辑区)                     │
-│ · 作品A ◀   │ · 第一章 ◀      │ 标题输入框                   │
-│ · 作品B     │ · 第二章        │ ┌─────────────────────────┐ │
-│ [+ 新建]    │ [+ 新建]        │ │ 正文 textarea           │ │
-│            │                │ └─────────────────────────┘ │
-│            │                │ Ctrl+S 保存（未保存状态提示） │
-└────────────┴────────────────┴─────────────────────────────┘
+├───────────────────────────────────────────────────────────┤
+│  我的书架                                                    │
+│  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐             │
+│  │ 作品A   │  │ 作品B   │  │ 作品C   │  │  + 新建 │             │
+│  │        │  │        │  │        │  │  作品   │             │
+│  └────────┘  └────────┘  └────────┘  └────────┘             │
+│  （卡片：书名、更新时间；hover 显示删除；点击进入编辑页）     │
+└───────────────────────────────────────────────────────────┘
 ```
 
-选中作品才加载其章节；选中章节才在编辑区显示内容。
+### 6.3 编辑页布局（WorkspaceView，两段式）
 
-### 6.3 组件划分
+```
+┌───────────────────────────────────────────────────────────┐
+│ 顶栏：← 返回书架 / 当前书名 / 退出登录                        │
+├────────────────┬──────────────────────────────────────────┤
+│ ChapterList     │ ChapterEditor                            │
+│ (本书的章节)     │ (编辑区)                                  │
+│ · 第一章 ◀      │ 标题输入框                                │
+│ · 第二章        │ ┌──────────────────────────────────────┐ │
+│ [+ 新建]        │ │ 正文 textarea                        │ │
+│                │ └──────────────────────────────────────┘ │
+│                │ 保存状态：未保存 / 保存中… / 已保存        │
+└────────────────┴──────────────────────────────────────────┘
+```
+
+进入编辑页时加载本书章节；选中章节才在编辑区显示内容。返回书架前若有未保存改动先 `flush()`。
+
+### 6.4 组件划分
 
 | 组件 | 职责 |
 | --- | --- |
-| `App.vue` | 按 token 渲染 LoginView 或 WorkspaceView |
+| `App.vue` | 按 token 与 currentWorkId 渲染 LoginView / BookshelfView / WorkspaceView |
 | `views/LoginView.vue` | 登录表单（迁移现有 App.vue 的登录 UI） |
-| `views/WorkspaceView.vue` | 三栏布局、顶栏，协调 works/chapters/editor |
-| `components/WorkList.vue` | 作品列表：展示、选中、新建、删除 |
+| `views/BookshelfView.vue` | 书架：卡片网格展示作品，新建、删除、点击进入 |
+| `views/WorkspaceView.vue` | 两段式布局、顶栏（含返回书架），协调 chapters/editor |
+| `components/WorkCard.vue` | 单个作品卡片（书名/更新时间/删除入口） |
 | `components/ChapterList.vue` | 当前作品的章节列表：展示、选中、新建、删除 |
 | `components/ChapterEditor.vue` | 编辑标题/正文，监听 Ctrl+S 手动保存 + 输入空闲触发自动保存，显示保存状态 |
 
-### 6.4 token 存储（避免循环依赖）
+### 6.5 token 存储（避免循环依赖）
 
 新增 `api/tokenStore.ts`：封装 `getToken()` / `setToken()` / `clearToken()`，读写 `localStorage`。`http.ts`、`useAuth` 都依赖它，打破 `useAuth → api → http` 的潜在环。
 
-### 6.5 状态管理（composables）
+### 6.6 状态管理（composables）
 
 `composables/useWorks.ts`：
 
@@ -337,12 +358,15 @@ function useWorks() {
   const list = ref<WorkSummary[]>([]);
   const currentId = ref<number | null>(null);
 
-  async function loadList(): Promise<void>;          // GET /works
-  async function select(id: number): Promise<void>;  // 设置 currentId，触发章节加载
-  async function create(): Promise<void>;            // POST /works
-  async function remove(id: number): Promise<void>;  // DELETE /works/:id
+  const current = computed(() => list.value.find(w => w.id === currentId.value) ?? null);
 
-  return { list, currentId, loadList, select, create, remove };
+  async function loadList(): Promise<void>;          // GET /works（进入书架时加载）
+  function open(id: number): void;                   // 设置 currentId → 进入编辑页
+  function backToShelf(): void;                      // 清空 currentId → 返回书架（调用方先 flush 未保存内容）
+  async function create(): Promise<void>;            // POST /works
+  async function remove(id: number): Promise<void>;  // DELETE /works/:id（若删当前书则回书架）
+
+  return { list, current, currentId, loadList, open, backToShelf, create, remove };
 }
 ```
 
@@ -385,7 +409,7 @@ save():
   saving = false
 ```
 
-### 6.5.1 空闲自动保存
+### 6.6.1 空闲自动保存
 
 - 编辑器每次输入（title/content 变更）调用 `scheduleAutoSave()`：重置一个防抖定时器，延时 `AUTOSAVE_IDLE_MS`（默认 3000ms）；期间继续输入会不断顺延，**停止输入满该时长才触发** `save()`。
 - 触发的自动保存复用 `save()`，因此仍有 MD5 判重与"保存中不重入"保护，不会产生无谓请求。
@@ -400,13 +424,13 @@ save():
 - 登录成功后经 `tokenStore.setToken` 持久化；应用启动读取以维持登录态
 - 暴露响应式 `token` 供 `App.vue` 判断视图；`logout` 调 `tokenStore.clearToken`
 
-### 6.6 哈希算法约定
+### 6.7 哈希算法约定
 
 - 使用 **MD5**，引入 `spark-md5`（前端计算）。
 - 计算对象固定为 `md5(JSON.stringify({ title, content }))`——用 JSON 序列化避免 title 含换行/分隔符时的歧义。
 - 后端不计算 hash，仅存储与等值比较，因此算法只需前端内部自洽即可。
 
-### 6.7 HTTP 层改造
+### 6.8 HTTP 层改造
 
 `api/http.ts`：
 
@@ -416,16 +440,17 @@ save():
   - `code !== 200` → 抛出 `message`
 - 新增 `api/work.ts`、`api/chapter.ts` 封装各接口，类型取自 `types/chapter.ts`
 
-### 6.8 前端文件规划
+### 6.9 前端文件规划
 
 ```
 front-end/src/
-├── App.vue                      # 改：视图切换
+├── App.vue                      # 改：登录 / 书架 / 编辑页 三态切换
 ├── views/
 │   ├── LoginView.vue            # 新增：迁移登录 UI
-│   └── WorkspaceView.vue        # 新增：三栏主界面
+│   ├── BookshelfView.vue        # 新增：书架（作品卡片网格）
+│   └── WorkspaceView.vue        # 新增：两段式编辑页（章节列表 + 编辑区）
 ├── components/
-│   ├── WorkList.vue             # 新增
+│   ├── WorkCard.vue             # 新增：书架单个作品卡片
 │   ├── ChapterList.vue          # 新增
 │   └── ChapterEditor.vue        # 新增
 ├── composables/
@@ -448,18 +473,20 @@ front-end/src/
 
 ## 7. 关键交互流程
 
-### 7.1 登录进入主界面
+### 7.1 登录进入书架
 
 1. LoginView 提交账号密码 → `POST /login`
 2. 后端 `AuthService.login` 校验成功 → `createToken`（HMAC 签名）→ 返回 token
-3. 前端 `tokenStore.setToken`，`App.vue` 检测到 token → 渲染 WorkspaceView
-4. WorkspaceView 挂载 → `useWorks.loadList()` 加载作品列表；默认选中第一个作品并加载其章节
+3. 前端 `tokenStore.setToken`，`App.vue` 检测到 token 且 `currentWorkId` 为空 → 渲染 BookshelfView
+4. BookshelfView 挂载 → `useWorks.loadList()` 加载作品列表，卡片网格展示
 
-### 7.2 选择作品 → 选择章节 → 编辑
+### 7.2 选书进入编辑页 → 选章 → 编辑
 
-1. 点击作品 → `useWorks.select(workId)` → `useChapters.loadList(workId)`（`GET /works/:workId/chapters`）
-2. 点击章节 → `useChapters.select(id)` → `GET /chapters/:id`；后端经 work 归属校验后返回详情
-3. `current` 更新，`savedHash = contentHash` → ChapterEditor 显示标题与正文
+1. 在书架点击某本书 → `useWorks.open(workId)` 设置 `currentId` → `App.vue` 切到 WorkspaceView
+2. WorkspaceView 挂载 → `useChapters.loadList(workId)`（`GET /works/:workId/chapters`）
+3. 点击章节 → `useChapters.select(id)` → `GET /chapters/:id`；后端经 work 归属校验后返回详情
+4. `current` 更新，`savedHash = contentHash` → ChapterEditor 显示标题与正文
+5. 点顶栏"← 返回书架"：若 `dirty` 先 `flush()`，再 `useWorks.backToShelf()` 清空 `currentId` 回到 BookshelfView
 
 ### 7.3 保存（手动 Ctrl+S / 空闲自动保存 + hash 判重）
 
@@ -480,9 +507,9 @@ front-end/src/
 
 ### 7.4 新建 / 删除
 
-- 新建作品：`POST /works` → 追加到作品列表并选中（其章节列表为空）
-- 新建章节：`POST /works/:workId/chapters` → 追加到章节列表并选中
-- 删除作品：确认后 `DELETE /works/:id`（级联删章节）→ 从列表移除；若删的是当前作品，清空章节列表与编辑区
+- 新建作品：书架点"+ 新建作品" → `POST /works` → 追加到书架卡片（可选：新建后直接 `open` 进入编辑页）
+- 删除作品：书架卡片上确认删除 → `DELETE /works/:id`（级联删章节）→ 从书架移除
+- 新建章节：编辑页点"+ 新建" → `POST /works/:workId/chapters` → 追加到章节列表并选中
 - 删除章节：确认后 `DELETE /chapters/:id` → 从列表移除；若删的是当前章节，清空编辑区
 
 ## 8. 安全性考虑
@@ -506,5 +533,5 @@ front-end/src/
 3. 后端上下文与业务：新增 `context.ts`（`Ctx` + 每请求构造），`route.ts` 构造/分派 `Ctx`；`WorkService` / `ChapterService`（含归属校验、hash 比对、显式 update_time）、`controller/work.ts` / `chapter.ts`（`(ctx) => Response`，调用 service 传原始参数）
 4. 前端基础：`tokenStore`、改造 `http.ts`（注入 token / 处理 code 401）与 `useAuth`（持久化）
 5. 前端数据层：引入 `spark-md5`，新增 `types/chapter.ts`、`api/work.ts`、`api/chapter.ts`、`useWorks`、`useChapters`（含 `save`/`scheduleAutoSave`/`flush` 与判重）
-6. 前端界面：拆分 LoginView，新增 WorkspaceView（三栏）/ WorkList / ChapterList / ChapterEditor，改造 App.vue 视图切换
+6. 前端界面：拆分 LoginView，新增 BookshelfView（书架 + WorkCard）、WorkspaceView（两段式：ChapterList + ChapterEditor），改造 App.vue 做登录/书架/编辑页三态切换
 7. 联调全流程：登录 → 作品列表 → 选作品 → 章节列表 → 选章节 → 编辑 → Ctrl+S（验证无变更不发请求、有变更写库）→ 新建/删除作品与章节 → 退出登录
