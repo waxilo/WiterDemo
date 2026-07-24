@@ -17,6 +17,10 @@ export interface ChapterSummary {
   title: string;
   sortOrder: number;
   updateTime: string;
+  /** Chinese character count (optional for compatibility with older APIs). */
+  wordCount?: number;
+  /** Visible character count including punctuation. */
+  charCount?: number;
 }
 
 /** Chapter detail (with content). */

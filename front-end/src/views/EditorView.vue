@@ -5,6 +5,7 @@ import type { useChapters } from "../composables/useChapters";
 import ChapterList from "../components/ChapterList.vue";
 import ChapterEditor from "../components/ChapterEditor.vue";
 import { useConfirm } from "../composables/useConfirm";
+import { formatCount, getTextStats } from "../utils/textStats";
 
 const confirm = useConfirm();
 
@@ -30,6 +31,8 @@ const {
   select,
   create,
   remove,
+  rename,
+  duplicate,
   reorder,
   flush,
 } = props.chapters;
@@ -40,6 +43,58 @@ const saveStatus = computed(() => {
   if (saving.value) return { text: "保存中", cls: "saving" };
   if (dirty.value) return { text: "未保存", cls: "dirty" };
   return { text: "已保存", cls: "saved" };
+});
+
+const currentStats = computed(() =>
+  getTextStats(current.value?.content ?? "")
+);
+
+const currentChapterNumber = computed(() => {
+  if (!current.value) return null;
+  const index = list.value.findIndex((chapter) => chapter.id === current.value?.id);
+  return index < 0 ? null : index + 1;
+});
+
+const currentChapterLabel = computed(() =>
+  currentChapterNumber.value === null ? "" : `第${currentChapterNumber.value}章`
+);
+
+const overallStats = computed(() =>
+  list.value.reduce(
+    (total, chapter) => {
+      const isCurrent = chapter.id === current.value?.id;
+      total.wordCount += isCurrent
+        ? currentStats.value.wordCount
+        : chapter.wordCount ?? 0;
+      total.charCount += isCurrent
+        ? currentStats.value.charCount
+        : chapter.charCount ?? 0;
+      return total;
+    },
+    { wordCount: 0, charCount: 0 }
+  )
+);
+
+const now = ref(Date.now());
+let relativeTimeTimer: ReturnType<typeof setInterval> | null = null;
+
+const lastSavedText = computed(() => {
+  const updateTime = current.value?.updateTime;
+  if (!updateTime) return "尚未保存";
+  const normalized = updateTime.includes("T")
+    ? updateTime
+    : `${updateTime.replace(" ", "T")}Z`;
+  const savedAt = new Date(normalized).getTime();
+  if (Number.isNaN(savedAt)) return "已保存";
+
+  const elapsedSeconds = Math.max(0, Math.floor((now.value - savedAt) / 1000));
+  if (elapsedSeconds < 60) return "刚刚";
+  if (elapsedSeconds < 3600) return `${Math.floor(elapsedSeconds / 60)} 分钟前`;
+  if (elapsedSeconds < 86400) return `${Math.floor(elapsedSeconds / 3600)} 小时前`;
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+  }).format(savedAt);
 });
 
 // --- book title inline rename (double-click) ---------------------------------
@@ -88,9 +143,15 @@ function onLogout() {
 onMounted(() => {
   if (bookId.value !== null) void props.chapters.loadList(bookId.value);
   window.addEventListener("keydown", onEsc);
+  relativeTimeTimer = setInterval(() => {
+    now.value = Date.now();
+  }, 30_000);
 });
 
-onUnmounted(() => window.removeEventListener("keydown", onEsc));
+onUnmounted(() => {
+  window.removeEventListener("keydown", onEsc);
+  if (relativeTimeTimer !== null) clearInterval(relativeTimeTimer);
+});
 
 function onEsc(e: KeyboardEvent) {
   if (e.key === "Escape") closeMenu();
@@ -112,10 +173,19 @@ async function onCreate() {
 async function onRemove(id: number) {
   const ok = await confirm({
     title: "删除章节？",
-    message: "删除后无法恢复。",
+    message: "删除后该章节内容无法恢复。",
     confirmText: "删除",
+    cancelText: "取消",
   });
   if (ok) await remove(id);
+}
+
+async function onRename(id: number, title: string) {
+  await rename(id, title);
+}
+
+async function onDuplicate(id: number) {
+  await duplicate(id);
 }
 
 function onReorder(ids: number[]) {
@@ -143,37 +213,40 @@ function onReorder(ids: number[]) {
       </div>
 
       <div class="bar-center">
-        <input
-          v-if="editingTitle"
-          ref="titleInput"
-          v-model="titleDraft"
-          class="book-title-input"
-          @keyup.enter="saveTitle"
-          @keyup.esc="cancelEditTitle"
-          @blur="saveTitle"
-        />
-        <span
-          v-else
-          class="book-title"
-          title="双击修改书名"
-          @dblclick="startEditTitle"
-          >{{ bookTitle }}</span
-        >
+        <div class="title-line">
+          <input
+            v-if="editingTitle"
+            ref="titleInput"
+            v-model="titleDraft"
+            class="book-title-input"
+            @keyup.enter="saveTitle"
+            @keyup.esc="cancelEditTitle"
+            @blur="saveTitle"
+          />
+          <span
+            v-else
+            class="book-title"
+            title="双击修改书名"
+            @dblclick="startEditTitle"
+            >{{ bookTitle }}</span
+          >
+        </div>
+        <div v-if="current" class="writing-meta">
+          <span>{{ currentChapterLabel }}</span>
+          <span class="meta-separator">·</span>
+          <Transition name="count" mode="out-in">
+            <span :key="currentStats.wordCount" class="numeric">
+              {{ formatCount(currentStats.wordCount) }} 字
+            </span>
+          </Transition>
+          <span class="meta-separator">·</span>
+          <span class="save-meta" :class="saveStatus?.cls">
+            {{ saveStatus?.text }}
+          </span>
+        </div>
       </div>
 
       <div class="bar-right">
-        <Transition name="fade">
-          <span
-            v-if="saveStatus"
-            class="status"
-            :class="saveStatus.cls"
-            :title="saveStatus.text"
-          >
-            <span class="dot"></span>
-            <span class="status-text">{{ saveStatus.text }}</span>
-          </span>
-        </Transition>
-
         <div class="user">
           <button
             class="user-trigger"
@@ -196,9 +269,7 @@ function onReorder(ids: number[]) {
 
           <Transition name="menu">
             <div v-if="menuOpen" class="menu" @click.stop>
-              <button class="menu-item" @click="closeMenu">个人中心</button>
-              <button class="menu-item" @click="closeMenu">设置</button>
-              <button class="menu-item" @click="closeMenu">主题</button>
+              <button class="menu-item" @click="closeMenu">个人设置</button>
               <div class="menu-sep"></div>
               <button class="menu-item danger" @click="onLogout">
                 退出登录
@@ -216,13 +287,45 @@ function onReorder(ids: number[]) {
       <ChapterList
         :chapters="list"
         :current-id="current?.id ?? null"
+        :current-word-count="currentStats.wordCount"
         :loading="loading"
         @select="onSelect"
         @create="onCreate"
         @remove="onRemove"
+        @rename="onRename"
+        @duplicate="onDuplicate"
         @reorder="onReorder"
       />
-      <ChapterEditor :chapters="chapters" />
+      <div class="editor-column">
+        <ChapterEditor :chapters="chapters" />
+        <footer class="writing-status">
+          <div class="status-overall">
+            全书 {{ list.length }} 章 ·
+            {{ formatCount(overallStats.wordCount) }} 字
+          </div>
+          <div v-if="current" class="status-current">
+            <span>{{ currentChapterLabel }}</span>
+            <span>
+              字数
+              <Transition name="count" mode="out-in">
+                <b :key="currentStats.wordCount">
+                  {{ formatCount(currentStats.wordCount) }}
+                </b>
+              </Transition>
+            </span>
+            <span>
+              字符
+              <Transition name="count" mode="out-in">
+                <b :key="currentStats.charCount">
+                  {{ formatCount(currentStats.charCount) }}
+                </b>
+              </Transition>
+            </span>
+            <span>最后保存：{{ lastSavedText }}</span>
+          </div>
+          <div v-else class="status-current">选择章节后开始写作</div>
+        </footer>
+      </div>
     </div>
   </div>
 </template>
@@ -239,7 +342,7 @@ function onReorder(ids: number[]) {
 
 /* ---- top bar ---- */
 .topbar {
-  height: 58px;
+  height: 64px;
   flex-shrink: 0;
   display: grid;
   grid-template-columns: 1fr auto 1fr;
@@ -261,6 +364,10 @@ function onReorder(ids: number[]) {
   justify-self: center;
   min-width: 0;
   max-width: 60vw;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
 }
 
 .bar-right {
@@ -307,6 +414,42 @@ function onReorder(ids: number[]) {
   border-radius: 8px;
   cursor: default;
   transition: background 0.2s ease;
+}
+
+.title-line {
+  width: 100%;
+  min-width: 0;
+}
+
+.writing-meta {
+  min-height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-size: 12px;
+  line-height: 1.2;
+  color: #888;
+  white-space: nowrap;
+}
+
+.meta-separator {
+  color: #bbb5aa;
+}
+
+.numeric,
+.writing-status b {
+  display: inline-block;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.save-meta.saving {
+  color: #78849c;
+}
+
+.save-meta.dirty {
+  color: #a48a56;
 }
 
 .book-title:hover {
@@ -492,6 +635,53 @@ function onReorder(ids: number[]) {
   overflow: hidden;
 }
 
+.editor-column {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.writing-status {
+  box-sizing: border-box;
+  min-height: 36px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 0 22px;
+  color: #999;
+  background: rgba(245, 243, 238, 0.92);
+  border-top: 1px solid rgba(0, 0, 0, 0.035);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.status-overall,
+.status-current {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  white-space: nowrap;
+}
+
+.count-enter-active,
+.count-leave-active {
+  transition: opacity 0.14s ease, transform 0.14s ease;
+}
+
+.count-enter-from {
+  opacity: 0;
+  transform: translateY(3px);
+}
+
+.count-leave-to {
+  opacity: 0;
+  transform: translateY(-3px);
+}
+
 @media (max-width: 760px) {
   .topbar {
     height: 56px;
@@ -529,6 +719,11 @@ function onReorder(ids: number[]) {
     text-align: center;
   }
 
+  .writing-meta {
+    gap: 3px;
+    font-size: 11px;
+  }
+
   .book-title-input {
     min-width: 0;
     font-size: 16px;
@@ -556,6 +751,28 @@ function onReorder(ids: number[]) {
     position: fixed;
     top: 62px;
     right: 8px;
+  }
+
+  .writing-status {
+    min-height: calc(36px + env(safe-area-inset-bottom));
+    padding: 0 10px env(safe-area-inset-bottom);
+    font-size: 11px;
+  }
+
+  .status-overall {
+    display: none;
+  }
+
+  .status-current {
+    width: 100%;
+    justify-content: space-between;
+    gap: 6px;
+  }
+}
+
+@media (max-width: 390px) {
+  .status-current span:last-child {
+    display: none;
   }
 }
 </style>

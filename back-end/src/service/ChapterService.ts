@@ -7,6 +7,21 @@ export interface SaveChapterInput {
   hash?: string;
 }
 
+const CJK_CHARACTER_PATTERN = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/g;
+const WHITESPACE_PATTERN = /\s/u;
+
+function getContentStats(content: string): {
+  wordCount: number;
+  charCount: number;
+} {
+  return {
+    wordCount: content.match(CJK_CHARACTER_PATTERN)?.length ?? 0,
+    charCount: Array.from(content).filter(
+      (character) => !WHITESPACE_PATTERN.test(character)
+    ).length,
+  };
+}
+
 function toSummary(row: ChapterRow): ChapterSummary {
   return {
     id: row.id,
@@ -14,6 +29,7 @@ function toSummary(row: ChapterRow): ChapterSummary {
     title: row.title,
     sortOrder: row.sort_order,
     updateTime: row.update_time,
+    ...getContentStats(row.content),
   };
 }
 

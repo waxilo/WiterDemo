@@ -3,10 +3,22 @@ import SparkMD5 from "spark-md5";
 import * as chapterApi from "../api/chapter";
 import type { Chapter, ChapterSummary } from "../types/chapter";
 import { AUTOSAVE_IDLE_MS } from "../config";
+import { getTextStats } from "../utils/textStats";
 
 /** Hash rule shared with the save flow: md5 of the JSON {title, content}. */
 function hashOf(title: string, content: string): string {
   return SparkMD5.hash(JSON.stringify({ title, content }));
+}
+
+function toSummary(chapter: Chapter): ChapterSummary {
+  return {
+    id: chapter.id,
+    bookId: chapter.bookId,
+    title: chapter.title,
+    sortOrder: chapter.sortOrder,
+    updateTime: chapter.updateTime,
+    ...getTextStats(chapter.content),
+  };
 }
 
 /**
@@ -71,13 +83,7 @@ export function useChapters() {
   async function create(bookId: number): Promise<void> {
     await flush();
     const chapter = await chapterApi.createChapter(bookId);
-    list.value.push({
-      id: chapter.id,
-      bookId: chapter.bookId,
-      title: chapter.title,
-      sortOrder: chapter.sortOrder,
-      updateTime: chapter.updateTime,
-    });
+    list.value.push(toSummary(chapter));
     current.value = chapter;
     savedHash.value = hashOf(chapter.title, chapter.content);
   }
@@ -99,11 +105,14 @@ export function useChapters() {
         hash,
       });
       savedHash.value = hash;
+      chapter.updateTime = saved.updateTime;
+      chapter.contentHash = saved.contentHash;
       // Reflect updated metadata in the list.
       const item = list.value.find((c) => c.id === saved.id);
       if (item) {
         item.title = saved.title;
         item.updateTime = saved.updateTime;
+        Object.assign(item, getTextStats(saved.content));
       }
     } finally {
       saving.value = false;
@@ -130,6 +139,64 @@ export function useChapters() {
     if (current.value?.id === id) {
       current.value = null;
       savedHash.value = null;
+    }
+  }
+
+  async function rename(id: number, title: string): Promise<void> {
+    const normalizedTitle = title.trim() || "未命名章节";
+    const item = list.value.find((chapter) => chapter.id === id);
+    if (item?.title === normalizedTitle) return;
+
+    if (current.value?.id === id) {
+      const previousTitle = current.value.title;
+      current.value.title = normalizedTitle;
+      if (item) item.title = normalizedTitle;
+      try {
+        await save();
+      } catch (error) {
+        current.value.title = previousTitle;
+        if (item) item.title = previousTitle;
+        throw error;
+      }
+      return;
+    }
+
+    const chapter = await chapterApi.getChapter(id);
+    const saved = await chapterApi.saveChapter(id, {
+      title: normalizedTitle,
+      content: chapter.content,
+      hash: hashOf(normalizedTitle, chapter.content),
+    });
+    if (item) Object.assign(item, toSummary(saved));
+  }
+
+  async function duplicate(id: number): Promise<void> {
+    await flush();
+    const source =
+      current.value?.id === id
+        ? current.value
+        : await chapterApi.getChapter(id);
+    const duplicateTitle = `${source.title || "未命名章节"} 副本`;
+    const created = await chapterApi.createChapter(source.bookId, duplicateTitle);
+
+    try {
+      const copied = await chapterApi.saveChapter(created.id, {
+        title: duplicateTitle,
+        content: source.content,
+        hash: hashOf(duplicateTitle, source.content),
+      });
+      const sourceIndex = list.value.findIndex((chapter) => chapter.id === id);
+      const insertIndex = sourceIndex < 0 ? list.value.length : sourceIndex + 1;
+      list.value.splice(insertIndex, 0, toSummary(copied));
+
+      const orderedIds = list.value.map((chapter) => chapter.id);
+      list.value = await chapterApi.reorderChapters(source.bookId, orderedIds);
+      current.value = copied;
+      savedHash.value = hashOf(copied.title, copied.content);
+    } catch (error) {
+      list.value = list.value.filter((chapter) => chapter.id !== created.id);
+      await chapterApi.deleteChapter(created.id).catch(() => undefined);
+      throw error;
     }
   }
 
@@ -165,6 +232,8 @@ export function useChapters() {
     scheduleAutoSave,
     flush,
     remove,
+    rename,
+    duplicate,
     reorder,
   };
 }
