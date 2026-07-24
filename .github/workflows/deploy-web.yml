@@ -38,5 +38,7 @@ jobs:
         working-directory: front-end
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # Account ID is an identifier, not a secret; hardcoded so the deploy
+          # doesn't depend on token-based account auto-discovery.
+          CLOUDFLARE_ACCOUNT_ID: "33d023f61ebac424923f7285f9b142f8"
         run: npx --yes wrangler@4 pages deploy dist --project-name=writer-demo-web --branch=main
