@@ -1,6 +1,7 @@
-// Use Tauri's HTTP plugin instead of the webview's fetch.
-// Requests go through the Rust backend, so browser CORS does not apply.
-import { fetch } from "@tauri-apps/plugin-http";
+// Use the platform's native fetch so the same code runs both in the browser
+// (web deployment) and inside the Tauri webview. The backend sends permissive
+// CORS headers and auth uses a Bearer token (not cookies), so cross-origin
+// requests work in both environments.
 import { API_BASE_URL } from "../config";
 import type { ApiResponse } from "../types/api";
 import { getToken, clearToken } from "./tokenStore";
