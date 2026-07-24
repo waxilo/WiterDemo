@@ -4,6 +4,10 @@ export interface Book {
   title: string;
   sortOrder: number;
   updateTime: string;
+  /** Number of chapters (optional: older API responses may omit it). */
+  chapterCount?: number;
+  /** Total character count across chapters (optional). */
+  wordCount?: number;
 }
 
 /** Chapter list item (no content). */

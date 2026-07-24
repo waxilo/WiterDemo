@@ -1,26 +1,91 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import type { Book } from "../types/chapter";
 
-defineProps<{ book: Book }>();
+const props = defineProps<{ book: Book }>();
 const emit = defineEmits<{
   (e: "open", id: number): void;
   (e: "remove", id: number): void;
 }>();
+
+// A small palette of muted "book cloth" tones. Picked deterministically by id
+// so a given book always keeps the same cover.
+const COVERS = [
+  "#C9B79C", // warm sand
+  "#B7C3CE", // cool gray-blue
+  "#AEC3B4", // soft green
+  "#C7B8CE", // muted lavender
+  "#CBB0A4", // clay
+  "#B9C0CC", // slate
+];
+
+const coverColor = computed(() => COVERS[props.book.id % COVERS.length]);
+const initial = computed(() => props.book.title?.trim().charAt(0) || "书");
+
+const chapterCount = computed(() => props.book.chapterCount ?? 0);
+const wordCount = computed(() => props.book.wordCount ?? 0);
+
+/** Friendly "last edited" label from the stored UTC timestamp. */
+const editedLabel = computed(() => {
+  const raw = props.book.updateTime;
+  if (!raw) return "—";
+  const d = new Date(raw.includes("T") ? raw : raw.replace(" ", "T") + "Z");
+  if (Number.isNaN(d.getTime())) return raw;
+
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  if (sameDay) return `今天 ${hh}:${mm}`;
+
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+});
 </script>
 
 <template>
-  <div class="card" @click="emit('open', book.id)">
-    <button
-      class="delete"
-      title="删除"
-      @click.stop="emit('remove', book.id)"
-    >
-      ×
+  <article class="card" @click="emit('open', book.id)">
+    <button class="delete" title="删除作品" @click.stop="emit('remove', book.id)">
+      <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+        <path
+          d="M6 6l12 12M18 6L6 18"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+        />
+      </svg>
     </button>
-    <div class="cover">{{ book.title.slice(0, 1) }}</div>
-    <div class="title">{{ book.title }}</div>
-    <div class="meta">{{ book.updateTime }}</div>
-  </div>
+
+    <div class="cover" :style="{ backgroundColor: coverColor }">
+      <span class="spine"></span>
+      <span class="initial">{{ initial }}</span>
+    </div>
+
+    <div class="info">
+      <h3 class="title">{{ book.title || "未命名作品" }}</h3>
+      <dl class="meta">
+        <div class="row">
+          <dt>最近编辑</dt>
+          <dd>{{ editedLabel }}</dd>
+        </div>
+        <div class="row">
+          <dt>章节</dt>
+          <dd>{{ chapterCount }} 章</dd>
+        </div>
+        <div class="row">
+          <dt>字数</dt>
+          <dd>{{ wordCount }} 字</dd>
+        </div>
+      </dl>
+    </div>
+  </article>
 </template>
 
 <style scoped>
@@ -28,67 +93,117 @@ const emit = defineEmits<{
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  padding: 1rem;
-  border: 1px solid #eee;
-  border-radius: 10px;
+  width: 260px;
+  height: 320px;
+  background: #fffdf8;
+  border-radius: 16px;
+  overflow: hidden;
   cursor: pointer;
-  background: #fff;
-  transition: box-shadow 0.2s, transform 0.2s;
+  box-shadow: none;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 .card:hover {
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
-  transform: translateY(-2px);
+  transform: translateY(-4px);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.08);
 }
 
-.delete {
-  position: absolute;
-  top: 0.4rem;
-  right: 0.4rem;
-  width: 1.5rem;
-  height: 1.5rem;
-  line-height: 1;
-  border: none;
-  border-radius: 50%;
-  background: #f1f3f5;
-  color: #868e96;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-
-.card:hover .delete {
-  opacity: 1;
-}
-
-.delete:hover {
-  background: #ffe3e3;
-  color: #e03131;
-}
-
+/* cover */
 .cover {
+  position: relative;
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 90px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #4f7cff, #7048e8);
-  color: #fff;
-  font-size: 2rem;
-  font-weight: 700;
+  overflow: hidden;
+}
+
+/* a subtle spine strip near the left edge for the "physical book" feel */
+.spine {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 16px;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.initial {
+  font-family: "Source Han Serif SC", "Noto Serif SC", "Songti SC", serif;
+  font-size: 48px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+  user-select: none;
+}
+
+/* info */
+.info {
+  flex-shrink: 0;
+  padding: 0.85rem 1rem 1rem;
+  border-top: 1px solid rgba(0, 0, 0, 0.05);
 }
 
 .title {
+  margin: 0 0 0.5rem;
+  font-size: 0.98rem;
   font-weight: 600;
-  color: #1a1a1a;
+  color: #2a2a2a;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .meta {
-  font-size: 0.78rem;
-  color: #adb5bd;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+}
+
+.row dt {
+  color: #aaa;
+}
+
+.row dd {
+  margin: 0;
+  color: #888;
+}
+
+/* delete affordance */
+.delete {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.85);
+  color: #888;
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.9);
+  transition: opacity 0.2s ease, transform 0.2s ease, background 0.2s ease,
+    color 0.2s ease;
+  z-index: 2;
+}
+
+.card:hover .delete {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.delete:hover {
+  background: #fff;
+  color: #e03131;
 }
 </style>

@@ -8,6 +8,9 @@ export interface BookRow {
   sort_order: number;
   create_time: string;
   update_time: string;
+  /** Aggregates, present only on the list query. */
+  chapter_count?: number;
+  word_count?: number;
 }
 
 /** Row shape for t_chapter. */
@@ -28,6 +31,10 @@ export interface Book {
   title: string;
   sortOrder: number;
   updateTime: string;
+  /** Number of chapters in the book. */
+  chapterCount: number;
+  /** Total character count across all chapters. */
+  wordCount: number;
 }
 
 /** Chapter list item (no content). */

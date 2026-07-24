@@ -6,6 +6,8 @@ function toBook(row: BookRow): Book {
     title: row.title,
     sortOrder: row.sort_order,
     updateTime: row.update_time,
+    chapterCount: row.chapter_count ?? 0,
+    wordCount: row.word_count ?? 0,
   };
 }
 
@@ -23,7 +25,12 @@ export async function getOwnedBook(
 /** List the user's books, ordered by sort_order. */
 export async function listBooks(env: Env, userId: number): Promise<Book[]> {
   const { results } = await env.DB.prepare(
-    `select * from t_book where user_id = ? order by sort_order asc, id asc`
+    `select b.*,
+       (select count(*) from t_chapter c where c.book_id = b.id) as chapter_count,
+       (select coalesce(sum(length(c.content)), 0) from t_chapter c where c.book_id = b.id) as word_count
+     from t_book b
+     where b.user_id = ?
+     order by b.sort_order asc, b.id asc`
   )
     .bind(userId)
     .all<BookRow>();
