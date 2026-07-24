@@ -1,6 +1,16 @@
 import { ref } from "vue";
-import { login as loginApi, register as registerApi } from "../api/auth";
-import { tokenRef, setToken, clearToken } from "../api/tokenStore";
+import {
+  login as loginApi,
+  register as registerApi,
+  logout as logoutApi,
+} from "../api/auth";
+import {
+  sessionRef,
+  setSession,
+  clearSession,
+  getRefreshToken,
+} from "../api/tokenStore";
+import { scheduleProactiveRefresh } from "../api/http";
 
 export type AuthMode = "login" | "register";
 
@@ -16,7 +26,7 @@ export function useAuth() {
   const confirmPassword = ref("");
   const loading = ref(false);
   const error = ref("");
-  const token = tokenRef();
+  const loggedIn = sessionRef();
 
   /** Switch between login and register, clearing transient state. */
   function switchMode(next: AuthMode) {
@@ -35,11 +45,12 @@ export function useAuth() {
     loading.value = true;
     error.value = "";
     try {
-      const value = await loginApi({
+      const tokens = await loginApi({
         username: username.value,
         password: password.value,
       });
-      setToken(value);
+      setSession(tokens);
+      scheduleProactiveRefresh();
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e);
     } finally {
@@ -60,11 +71,12 @@ export function useAuth() {
     loading.value = true;
     error.value = "";
     try {
-      const value = await registerApi({
+      const tokens = await registerApi({
         username: username.value,
         password: password.value,
       });
-      setToken(value);
+      setSession(tokens);
+      scheduleProactiveRefresh();
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e);
     } finally {
@@ -77,8 +89,17 @@ export function useAuth() {
     return mode.value === "login" ? login() : register();
   }
 
-  function logout() {
-    clearToken();
+  async function logout() {
+    const rt = getRefreshToken();
+    // Best-effort server-side revocation; clear locally regardless.
+    if (rt) {
+      try {
+        await logoutApi(rt);
+      } catch {
+        // ignore network/revocation errors
+      }
+    }
+    clearSession();
     error.value = "";
   }
 
@@ -89,7 +110,7 @@ export function useAuth() {
     confirmPassword,
     loading,
     error,
-    token,
+    loggedIn,
     switchMode,
     submit,
     login,

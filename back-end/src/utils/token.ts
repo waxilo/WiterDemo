@@ -1,17 +1,43 @@
 // Stateless signed auth tokens (compact JWT, HS256).
-// The token embeds { uid, iat, exp } and is signed with TOKEN_SECRET, so it can
-// be verified without a database lookup.
+//
+// Two token types share the same JWT machinery but use different secrets and
+// TTLs, and carry a `typ` claim so an access token can never be used where a
+// refresh token is expected (and vice versa):
+//   - access  : short-lived (ACCESS_TTL), verified on every API request.
+//   - refresh : long-lived (REFRESH_TTL), carries a `jti` and is only accepted
+//               at /refresh, cross-checked against a server-side session.
 
 import type { TokenCheck } from "../types";
 
-const EXPIRE_SECONDS = 7 * 24 * 60 * 60;
+export const ACCESS_TTL = 15 * 60; // 15 minutes
+export const REFRESH_TTL = 30 * 24 * 60 * 60; // 30 days
 
 const HEADER = { alg: "HS256", typ: "JWT" };
 
-interface Payload {
+type TokenType = "access" | "refresh";
+
+interface AccessPayload {
   uid: number;
   iat: number;
   exp: number;
+  typ: "access";
+}
+
+interface RefreshPayload {
+  uid: number;
+  iat: number;
+  exp: number;
+  typ: "refresh";
+  jti: string;
+}
+
+type AnyPayload = AccessPayload | RefreshPayload;
+
+/** Result of verifying a refresh token. */
+export interface RefreshCheck {
+  success: boolean;
+  uid?: number;
+  jti?: string;
 }
 
 /** URL-safe base64 encode a UTF-8 string. */
@@ -55,50 +81,116 @@ async function sign(signingInput: string, secret: string): Promise<string> {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-/** Issue a signed token for the given user id. */
-export async function createToken(userId: number, env: Env): Promise<string> {
+/** Sign a JWT with the given payload claims, TTL and secret. */
+async function signJwt(
+  claims: Record<string, unknown>,
+  ttlSeconds: number,
+  secret: string
+): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
-  const payload: Payload = { uid: userId, iat: now, exp: now + EXPIRE_SECONDS };
+  const payload = { ...claims, iat: now, exp: now + ttlSeconds };
 
   const encodedHeader = base64UrlEncode(JSON.stringify(HEADER));
   const encodedPayload = base64UrlEncode(JSON.stringify(payload));
   const signingInput = `${encodedHeader}.${encodedPayload}`;
-  const signature = await sign(signingInput, env.TOKEN_SECRET);
-
+  const signature = await sign(signingInput, secret);
   return `${signingInput}.${signature}`;
 }
 
-/** Verify a token's signature and expiry; return the user id on success. */
-export async function checkToken(token: string, env: Env): Promise<TokenCheck> {
+/** Verify a JWT's signature and expiry with the given secret; return payload. */
+async function verifyJwt<T extends AnyPayload>(
+  token: string,
+  secret: string
+): Promise<T | null> {
   const parts = token.split(".");
-  if (parts.length !== 3) return { success: false };
+  if (parts.length !== 3) return null;
 
   const [encodedHeader, encodedPayload, signature] = parts;
   const signingInput = `${encodedHeader}.${encodedPayload}`;
 
-  const expected = await sign(signingInput, env.TOKEN_SECRET);
+  const expected = await sign(signingInput, secret);
   const sigBytes = new TextEncoder().encode(signature);
   const expectedBytes = new TextEncoder().encode(expected);
   if (
     sigBytes.byteLength !== expectedBytes.byteLength ||
     !crypto.subtle.timingSafeEqual(sigBytes, expectedBytes)
   ) {
-    return { success: false };
+    return null;
   }
 
-  let payload: Payload;
+  let payload: T;
   try {
-    payload = JSON.parse(base64UrlDecode(encodedPayload)) as Payload;
+    payload = JSON.parse(base64UrlDecode(encodedPayload)) as T;
   } catch {
-    return { success: false };
+    return null;
   }
 
-  if (typeof payload.uid !== "number" || typeof payload.exp !== "number") {
-    return { success: false };
+  if (typeof payload.exp !== "number" || payload.exp * 1000 <= Date.now()) {
+    return null;
   }
-  if (payload.exp * 1000 <= Date.now()) {
-    return { success: false };
-  }
+  return payload;
+}
 
+/** Issue a short-lived access token for the given user id. */
+export function createAccessToken(userId: number, env: Env): Promise<string> {
+  return signJwt(
+    { uid: userId, typ: "access" satisfies TokenType },
+    ACCESS_TTL,
+    env.TOKEN_SECRET
+  );
+}
+
+/** Issue a long-lived refresh token; returns the token plus its jti/expiry. */
+export async function createRefreshToken(
+  userId: number,
+  env: Env
+): Promise<{ token: string; jti: string; expMs: number }> {
+  const jti = crypto.randomUUID();
+  const token = await signJwt(
+    { uid: userId, typ: "refresh" satisfies TokenType, jti },
+    REFRESH_TTL,
+    env.REFRESH_SECRET
+  );
+  return { token, jti, expMs: (Math.floor(Date.now() / 1000) + REFRESH_TTL) * 1000 };
+}
+
+/** Verify an access token; returns the embedded user id on success. */
+export async function verifyAccess(
+  token: string,
+  env: Env
+): Promise<TokenCheck> {
+  const payload = await verifyJwt<AccessPayload>(token, env.TOKEN_SECRET);
+  if (!payload || payload.typ !== "access" || typeof payload.uid !== "number") {
+    return { success: false };
+  }
   return { success: true, userId: payload.uid };
+}
+
+/** Verify a refresh token; returns the embedded user id and jti on success. */
+export async function verifyRefresh(
+  token: string,
+  env: Env
+): Promise<RefreshCheck> {
+  const payload = await verifyJwt<RefreshPayload>(token, env.REFRESH_SECRET);
+  if (
+    !payload ||
+    payload.typ !== "refresh" ||
+    typeof payload.uid !== "number" ||
+    typeof payload.jti !== "string"
+  ) {
+    return { success: false };
+  }
+  return { success: true, uid: payload.uid, jti: payload.jti };
+}
+
+/** SHA-256 hash (hex) of a string; used to store refresh tokens at rest. */
+export async function sha256Hex(input: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(input)
+  );
+  const bytes = new Uint8Array(digest);
+  let hex = "";
+  for (const b of bytes) hex += b.toString(16).padStart(2, "0");
+  return hex;
 }

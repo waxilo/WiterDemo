@@ -1,4 +1,4 @@
-import { login, register } from "./controller/login";
+import { login, register, refresh, logout } from "./controller/login";
 import * as userController from "./controller/user";
 import * as bookController from "./controller/book";
 import * as chapterController from "./controller/chapter";
@@ -21,6 +21,12 @@ export async function router(ctx: Ctx): Promise<Response> {
     segments[0] === "register"
   ) {
     return register(ctx);
+  }
+  if (method === "POST" && segments.length === 1 && segments[0] === "refresh") {
+    return refresh(ctx);
+  }
+  if (method === "POST" && segments.length === 1 && segments[0] === "logout") {
+    return logout(ctx);
   }
 
   // Everything else requires a valid token.

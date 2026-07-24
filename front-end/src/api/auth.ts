@@ -1,14 +1,23 @@
 import { request } from "./http";
-import type { LoginParams, LoginResult, UserInfo } from "../types/auth";
+import type { LoginParams, AuthTokens, UserInfo } from "../types/auth";
 
-/** Authenticate a user; resolves to the session token on success. */
-export function login(params: LoginParams): Promise<LoginResult> {
-  return request<LoginResult>("/login", { method: "POST", body: params });
+/** Authenticate a user; resolves to a token pair on success. */
+export function login(params: LoginParams): Promise<AuthTokens> {
+  return request<AuthTokens>("/login", { method: "POST", body: params });
 }
 
-/** Register a new user; resolves to the session token (auto login). */
-export function register(params: LoginParams): Promise<LoginResult> {
-  return request<LoginResult>("/register", { method: "POST", body: params });
+/** Register a new user; resolves to a token pair (auto login). */
+export function register(params: LoginParams): Promise<AuthTokens> {
+  return request<AuthTokens>("/register", { method: "POST", body: params });
+}
+
+/** Revoke the given refresh token server-side (logout). */
+export function logout(refreshToken: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>("/logout", {
+    method: "POST",
+    body: { refreshToken },
+    skipAuthRefresh: true,
+  });
 }
 
 /** Fetch the currently authenticated user's info. */
