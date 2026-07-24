@@ -2,7 +2,7 @@
 
 ## 1. 概述
 
-本文档描述写作助手核心功能的设计：用户登录后先进入**书架**，书架以卡片形式展示其全部作品（书）；点击一本书进入该书的**两段式**编辑页——左侧为章节列表，右侧为章节内容编辑区。点击某章在右侧编辑，按 Ctrl+S 或空闲自动保存把章节内容持久化到数据库。
+本文档描述写作助手核心功能的设计：用户登录后先进入**书架**，书架以卡片形式展示其全部书籍；点击一本书进入该书的**两段式**编辑页——左侧为章节列表，右侧为章节内容编辑区。点击某章在右侧编辑，按 Ctrl+S 或空闲自动保存把章节内容持久化到数据库。
 
 本设计在现有项目基础上扩展，保持与既有架构、代码风格和 API 约定一致：
 
@@ -12,8 +12,8 @@
 
 ### 目标
 
-- 登录成功后进入书架页，展示当前用户的全部作品（书），支持新建、删除、进入
-- 作品层：一个用户可有多个作品（书），章节归属于作品
+- 登录成功后进入书架页，展示当前用户的全部书籍，支持新建、删除、进入
+- 书籍层：一个用户可有多本书，章节归属于某本书
 - 选择一本书进入两段式编辑页：左侧章节列表（新建、选择、删除），右侧章节内容编辑区
 - 编辑区可返回书架；支持切换到该书的其它章节
 - 保存机制：手动 Ctrl+S + **空闲自动保存**（停止输入一段时间后自动触发），均在保存前用 MD5 判重
@@ -36,7 +36,7 @@
 | `utils/token.ts` | `checkToken` 是桩实现；`createToken` 拼接 `issuedAt@uuid@expiredAt`，字段可被客户端篡改 | 改为 **HMAC-SHA256 签名 token（JWT 风格）** 的签发/验签 |
 | `AuthService.login` | 校验账号密码后返回 token，但未持久化 | 改为签发签名 token；`t_login_log` 降级为可选登录审计（不在认证路径上） |
 | `response.ts` | `jsonResponse(data, code, message)` 统一封装（HTTP 恒 200），含 CORS 头 | 直接复用，所有响应都走它 |
-| 数据访问 | `env.DB.prepare(sql).bind(...).first()` / `.all()` / `.run()` | 作品/章节 CRUD 沿用此模式 |
+| 数据访问 | `env.DB.prepare(sql).bind(...).first()` / `.all()` / `.run()` | 书/章节 CRUD 沿用此模式 |
 
 > 认证采用**无状态签名 token**（见 5.5）。改造后 `checkAuth` 不再读 `t_login_log`，因此无需给该表补 `uuid` 列。
 
@@ -54,38 +54,38 @@
 ```
 ┌─────────────────────────── 前端 (Tauri + Vue 3) ───────────────────────────┐
 │  App.vue ─▶ LoginView（无 token）                                          │
-│          └▶ 已登录 ─▶ BookshelfView（书架）──选书──▶ WorkspaceView（两段式） │
+│          └▶ 已登录 ─▶ BookshelfView（书架）──选书──▶ EditorView（两段式） │
 │                                          │              │                   │
 │                                          │      ┌───────┴────────┐          │
 │                                          │      │ ChapterList │ ChapterEditor│
 │                                          │      └───────┬────────┘          │
-│  composables: useAuth / useWorks / useChapters         │                    │
-│  api: tokenStore ◀─ http.ts ◀─ auth.ts / work.ts / chapter.ts             │
+│  composables: useAuth / useBooks / useChapters         │                    │
+│  api: tokenStore ◀─ http.ts ◀─ auth.ts / book.ts / chapter.ts             │
 └──────────────────────────────────────────┼────────────────────────────────┘
                                              │ HTTPS  { code, message, data }
 ┌──────────────────────────────────────────▼────────────────────────────────┐
 │                       后端 (Cloudflare Workers)                            │
 │  index.ts ─▶ route.ts ─▶ checkAuth(中间件) ─▶ controller ─▶ service ─▶ D1   │
-│  controller: work.ts / chapter.ts   service: WorkService / ChapterService  │
-│  DB: t_user / t_login_log / t_work / t_chapter                             │
+│  controller: book.ts / chapter.ts   service: BookService / ChapterService  │
+│  DB: t_user / t_login_log / t_book / t_chapter                             │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## 4. 数据模型设计
 
-### 4.1 作品表 `t_work`（新增迁移 `0002_work_chapter.sql`）
+### 4.1 书籍表 `t_book`（新增迁移 `0002_book_chapter.sql`）
 
 ```sql
-CREATE TABLE IF NOT EXISTS t_work (
+CREATE TABLE IF NOT EXISTS t_book (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id     INTEGER NOT NULL,             -- 归属用户
-  title       TEXT NOT NULL DEFAULT '未命名作品',
-  sort_order  INTEGER NOT NULL DEFAULT 0,   -- 作品列表排序
+  title       TEXT NOT NULL DEFAULT '未命名书',
+  sort_order  INTEGER NOT NULL DEFAULT 0,   -- 书列表排序
   create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
   update_time DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_work_user ON t_work (user_id, sort_order);
+CREATE INDEX IF NOT EXISTS idx_book_user ON t_book (user_id, sort_order);
 ```
 
 ### 4.2 章节表 `t_chapter`（同一迁移文件）
@@ -93,30 +93,30 @@ CREATE INDEX IF NOT EXISTS idx_work_user ON t_work (user_id, sort_order);
 ```sql
 CREATE TABLE IF NOT EXISTS t_chapter (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  work_id      INTEGER NOT NULL,            -- 归属作品
+  book_id      INTEGER NOT NULL,            -- 归属书
   title        TEXT NOT NULL DEFAULT '未命名章节',
   content      TEXT NOT NULL DEFAULT '',    -- 章节正文
   content_hash TEXT,                        -- 最近一次保存内容的 hash（前端计算，后端仅存储/比对）
-  sort_order   INTEGER NOT NULL DEFAULT 0,  -- 作品内章节排序
+  sort_order   INTEGER NOT NULL DEFAULT 0,  -- 书内章节排序
   create_time  DATETIME DEFAULT CURRENT_TIMESTAMP,
   update_time  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_chapter_work ON t_chapter (work_id, sort_order);
+CREATE INDEX IF NOT EXISTS idx_chapter_book ON t_chapter (book_id, sort_order);
 ```
 
 字段与归属说明：
 
-- **归属链**：`t_chapter.work_id → t_work.id → t_work.user_id`。章节表不冗余存 `user_id`，越权校验通过关联作品判断（见 5.6），避免冗余字段不一致。
+- **归属链**：`t_chapter.book_id → t_book.id → t_book.user_id`。章节表不冗余存 `user_id`，越权校验通过关联书判断（见 5.6），避免冗余字段不一致。
 - `content_hash`：保存时前端传入的内容 hash，后端**原样存储、原样比对，不重新计算**（Workers 的 Web Crypto 同样不支持 MD5，无需在后端算）。
-- `sort_order`：作品内排序，新建时取该作品下最大值 +1。
+- `sort_order`：书内排序，新建时取该书下最大值 +1。
 - `update_time`：**SQLite 的 `DEFAULT CURRENT_TIMESTAMP` 仅在 INSERT 生效，UPDATE 不会自动更新**。因此所有 UPDATE 语句必须显式 `SET update_time = CURRENT_TIMESTAMP`。
 
 ### 4.3 `t_login_log`（无需改动）
 
 采用无状态签名 token 后，`checkAuth` 不再查 `t_login_log`，因此**不需要给它补 `uuid` 列，也不新增迁移**。该表保留为可选的登录审计记录（`AuthService.login` 可选写入，不影响认证）。
 
-> 本期仅一个新增迁移 `0002_work_chapter.sql`，通过 `wrangler d1 migrations apply` 应用（先本地后远端）。
+> 本期仅一个新增迁移 `0002_book_chapter.sql`，通过 `wrangler d1 migrations apply` 应用（先本地后远端）。
 
 ## 5. 后端 API 设计
 
@@ -124,21 +124,21 @@ CREATE INDEX IF NOT EXISTS idx_chapter_work ON t_chapter (work_id, sort_order);
 
 ### 5.1 接口列表
 
-作品：
+书：
 
 | 方法 | 路径 | 说明 | 请求体 | 返回 data |
 | --- | --- | --- | --- | --- |
-| GET | `/works` | 当前用户的作品列表 | - | `WorkSummary[]` |
-| POST | `/works` | 新建作品 | `{ title? }` | `Work` |
-| PUT | `/works/:id` | 重命名作品 | `{ title }` | `Work` |
-| DELETE | `/works/:id` | 删除作品（级联删除其章节） | - | `{ id }` |
+| GET | `/books` | 当前用户的书列表 | - | `BookSummary[]` |
+| POST | `/books` | 新建书 | `{ title? }` | `Book` |
+| PUT | `/books/:id` | 重命名书 | `{ title }` | `Book` |
+| DELETE | `/books/:id` | 删除书（级联删除其章节） | - | `{ id }` |
 
-章节（挂在作品下）：
+章节（挂在书下）：
 
 | 方法 | 路径 | 说明 | 请求体 | 返回 data |
 | --- | --- | --- | --- | --- |
-| GET | `/works/:workId/chapters` | 某作品的章节列表（不含正文） | - | `ChapterSummary[]` |
-| POST | `/works/:workId/chapters` | 在作品下新建章节 | `{ title? }` | `Chapter` |
+| GET | `/books/:bookId/chapters` | 某书的章节列表（不含正文） | - | `ChapterSummary[]` |
+| POST | `/books/:bookId/chapters` | 在书下新建章节 | `{ title? }` | `Chapter` |
 | GET | `/chapters/:id` | 章节详情（含正文） | - | `Chapter` |
 | PUT | `/chapters/:id` | 保存章节（Ctrl+S 触发） | `{ title, content, hash }` | `Chapter` |
 | DELETE | `/chapters/:id` | 删除章节 | - | `{ id }` |
@@ -153,7 +153,7 @@ interface Ctx {
   env: Env;
   url: URL;
   method: string;
-  params: Record<string, string>;   // 路由参数，如 { id } / { workId }
+  params: Record<string, string>;   // 路由参数，如 { id } / { bookId }
   userId: number;                    // checkAuth 成功后写入
   json<T>(): Promise<T>;             // 惰性解析请求体（缓存结果）
 }
@@ -177,22 +177,22 @@ export async function saveChapter(ctx: Ctx) {
 
 ### 5.3 路由实现
 
-保持手写风格，不引入路由库。`index.ts` 收到请求后构造 `Ctx`（填入 request/env/url/method）。`route.ts` 按 pathname 分段解析：切分 `url.pathname` 为段数组，按 `["works"]`、`["works", id]`、`["works", workId, "chapters"]`、`["chapters", id]` 结合 `method` 匹配，把解析出的路由参数写入 `ctx.params`。登录 `POST /login`（免认证）；其余接口先 `checkAuth(ctx)`，成功后把 `userId` 写入 `ctx` 再分派到对应 controller。
+保持手写风格，不引入路由库。`index.ts` 收到请求后构造 `Ctx`（填入 request/env/url/method）。`route.ts` 按 pathname 分段解析：切分 `url.pathname` 为段数组，按 `["books"]`、`["books", id]`、`["books", bookId, "chapters"]`、`["chapters", id]` 结合 `method` 匹配，把解析出的路由参数写入 `ctx.params`。登录 `POST /login`（免认证）；其余接口先 `checkAuth(ctx)`，成功后把 `userId` 写入 `ctx` 再分派到对应 controller。
 
 ### 5.4 数据结构
 
 ```typescript
-interface WorkSummary {
+interface BookSummary {
   id: number;
   title: string;
   sortOrder: number;
   updateTime: string;
 }
-type Work = WorkSummary; // 作品暂无额外详情字段，二者一致
+type Book = BookSummary; // 书暂无额外详情字段，二者一致
 
 interface ChapterSummary {
   id: number;
-  workId: number;
+  bookId: number;
   title: string;
   sortOrder: number;
   updateTime: string;
@@ -205,7 +205,7 @@ interface Chapter extends ChapterSummary {
 }
 ```
 
-> DB 字段为下划线命名（`work_id`、`sort_order`），service 层返回前统一转驼峰（`workId`、`sortOrder`）。
+> DB 字段为下划线命名（`book_id`、`sort_order`），service 层返回前统一转驼峰（`bookId`、`sortOrder`）。
 
 ### 5.5 认证链路：无状态签名 token（HMAC-SHA256）
 
@@ -245,7 +245,7 @@ signature = HMAC_SHA256(`${b64(header)}.${b64(payload)}`, TOKEN_SECRET)
 ### 5.6 保存语义与 hash 判重
 
 - **保存（PUT /chapters/:id）**：更新 `title`、`content`、`content_hash`、`update_time`，写入数据库。
-- **越权校验**：先按 `chapter.id` 取出章节，经 `work_id` 关联 `t_work` 确认 `t_work.user_id === 当前 userId`；不符返回 `code=403, message="无权操作"`。作品级接口同理校验 `t_work.user_id`。
+- **越权校验**：先按 `chapter.id` 取出章节，经 `book_id` 关联 `t_book` 确认 `t_book.user_id === 当前 userId`；不符返回 `code=403, message="无权操作"`。书级接口同理校验 `t_book.user_id`。
 - **hash 幂等兜底**：请求体带前端算好的 `hash`。后端比对该章库中的 `content_hash`：
   - 相同 → 判定无变更，**跳过写库**，直接返回当前详情（`message` 标注"无变更"）。
   - 不同或库中为空 → 正常写入，并把 `content_hash` 更新为本次 `hash`。
@@ -259,8 +259,8 @@ signature = HMAC_SHA256(`${b64(header)}.${b64(payload)}`, TOKEN_SECRET)
 | --- | --- | --- |
 | 200 | 成功 | 正常返回 |
 | 401 | 未登录 / token 失效 | `checkAuth` 失败（**改为经 `jsonResponse` 返回，不再用 HTTP 401**） |
-| 403 | 无权操作 | 作品/章节不属于当前用户 |
-| 404 | 资源不存在 | 作品/章节 id 不存在 |
+| 403 | 无权操作 | 书/章节不属于当前用户 |
+| 404 | 资源不存在 | 书/章节 id 不存在 |
 | 500 | 服务端异常 | 未预期错误 |
 
 ### 5.8 后端文件规划
@@ -272,10 +272,10 @@ back-end/
 └── src/
     ├── context.ts         # 新增：Ctx 类型与每请求构造（含 json() 惰性解析）
     ├── controller/
-    │   ├── work.ts         # 新增：签名 (ctx) => Response
+    │   ├── book.ts         # 新增：签名 (ctx) => Response
     │   └── chapter.ts      # 新增：签名 (ctx) => Response
     ├── service/
-    │   ├── WorkService.ts  # 新增：作品 CRUD + 驼峰转换（接 env/userId，不接 Ctx）
+    │   ├── BookService.ts  # 新增：书 CRUD + 驼峰转换（接 env/userId，不接 Ctx）
     │   ├── ChapterService.ts # 新增：章节 CRUD + 归属校验 + hash 比对（不接 Ctx）
     │   └── AuthService.ts  # 改：签发签名 token（可选写审计）
     ├── middleware/auth.ts  # 改：checkAuth(ctx) 无状态验签，写入 ctx.userId
@@ -294,11 +294,11 @@ back-end/
 App.vue
  ├─ 无 token                    → <LoginView>        （由现有登录卡片重构而来）
  └─ 有 token
-     ├─ 未选书（currentWorkId 空）→ <BookshelfView>    （书架）
-     └─ 已选书                   → <WorkspaceView>    （两段式编辑页）
+     ├─ 未选书（currentBookId 空）→ <BookshelfView>    （书架）
+     └─ 已选书                   → <EditorView>    （两段式编辑页）
 ```
 
-选书即设置 `useWorks.currentId`，返回书架即清空它。
+选书即设置 `useBooks.currentId`，返回书架即清空它。
 
 ### 6.2 书架页布局（BookshelfView）
 
@@ -308,14 +308,14 @@ App.vue
 ├───────────────────────────────────────────────────────────┤
 │  我的书架                                                    │
 │  ┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐             │
-│  │ 作品A   │  │ 作品B   │  │ 作品C   │  │  + 新建 │             │
-│  │        │  │        │  │        │  │  作品   │             │
+│  │ 书A   │  │ 书B   │  │ 书C   │  │  + 新建 │             │
+│  │        │  │        │  │        │  │  书   │             │
 │  └────────┘  └────────┘  └────────┘  └────────┘             │
 │  （卡片：书名、更新时间；hover 显示删除；点击进入编辑页）     │
 └───────────────────────────────────────────────────────────┘
 ```
 
-### 6.3 编辑页布局（WorkspaceView，两段式）
+### 6.3 编辑页布局（EditorView，两段式）
 
 ```
 ┌───────────────────────────────────────────────────────────┐
@@ -337,12 +337,12 @@ App.vue
 
 | 组件 | 职责 |
 | --- | --- |
-| `App.vue` | 按 token 与 currentWorkId 渲染 LoginView / BookshelfView / WorkspaceView |
+| `App.vue` | 按 token 与 currentBookId 渲染 LoginView / BookshelfView / EditorView |
 | `views/LoginView.vue` | 登录表单（迁移现有 App.vue 的登录 UI） |
-| `views/BookshelfView.vue` | 书架：卡片网格展示作品，新建、删除、点击进入 |
-| `views/WorkspaceView.vue` | 两段式布局、顶栏（含返回书架），协调 chapters/editor |
-| `components/WorkCard.vue` | 单个作品卡片（书名/更新时间/删除入口） |
-| `components/ChapterList.vue` | 当前作品的章节列表：展示、选中、新建、删除 |
+| `views/BookshelfView.vue` | 书架：卡片网格展示书籍，新建、删除、点击进入 |
+| `views/EditorView.vue` | 两段式布局、顶栏（含返回书架），协调 chapters/editor |
+| `components/BookCard.vue` | 单本书的卡片（书名/更新时间/删除入口） |
+| `components/ChapterList.vue` | 当前书的章节列表：展示、选中、新建、删除 |
 | `components/ChapterEditor.vue` | 编辑标题/正文，监听 Ctrl+S 手动保存 + 输入空闲触发自动保存，显示保存状态 |
 
 ### 6.5 token 存储（避免循环依赖）
@@ -351,26 +351,26 @@ App.vue
 
 ### 6.6 状态管理（composables）
 
-`composables/useWorks.ts`：
+`composables/useBooks.ts`：
 
 ```typescript
-function useWorks() {
-  const list = ref<WorkSummary[]>([]);
+function useBooks() {
+  const list = ref<BookSummary[]>([]);
   const currentId = ref<number | null>(null);
 
   const current = computed(() => list.value.find(w => w.id === currentId.value) ?? null);
 
-  async function loadList(): Promise<void>;          // GET /works（进入书架时加载）
+  async function loadList(): Promise<void>;          // GET /books（进入书架时加载）
   function open(id: number): void;                   // 设置 currentId → 进入编辑页
   function backToShelf(): void;                      // 清空 currentId → 返回书架（调用方先 flush 未保存内容）
-  async function create(): Promise<void>;            // POST /works
-  async function remove(id: number): Promise<void>;  // DELETE /works/:id（若删当前书则回书架）
+  async function create(): Promise<void>;            // POST /books
+  async function remove(id: number): Promise<void>;  // DELETE /books/:id（若删当前书则回书架）
 
   return { list, current, currentId, loadList, open, backToShelf, create, remove };
 }
 ```
 
-`composables/useChapters.ts`（依赖当前作品 id）：
+`composables/useChapters.ts`（依赖当前书 id）：
 
 ```typescript
 function useChapters() {
@@ -382,9 +382,9 @@ function useChapters() {
   const dirty = computed(() => currentHash() !== savedHash.value);  // 有未保存改动
 
   function currentHash(): string;                            // hash(JSON.stringify({ title, content }))
-  async function loadList(workId: number): Promise<void>;    // GET /works/:workId/chapters
+  async function loadList(bookId: number): Promise<void>;    // GET /books/:bookId/chapters
   async function select(id: number): Promise<void>;          // GET /chapters/:id，加载后 savedHash=contentHash
-  async function create(workId: number): Promise<void>;      // POST /works/:workId/chapters
+  async function create(bookId: number): Promise<void>;      // POST /books/:bookId/chapters
   async function save(): Promise<void>;                      // PUT /chapters/:id（手动/自动共用，见下）
   function scheduleAutoSave(): void;                         // 输入变更时调用，防抖排期自动保存
   async function flush(): Promise<void>;                     // 立即落盘（切换/退出前调用）
@@ -414,7 +414,7 @@ save():
 - 编辑器每次输入（title/content 变更）调用 `scheduleAutoSave()`：重置一个防抖定时器，延时 `AUTOSAVE_IDLE_MS`（默认 3000ms）；期间继续输入会不断顺延，**停止输入满该时长才触发** `save()`。
 - 触发的自动保存复用 `save()`，因此仍有 MD5 判重与"保存中不重入"保护，不会产生无谓请求。
 - **强制落盘时机**：`flush()` 在以下场景立即保存（若 `dirty`），避免丢改动：
-  - 切换到其它章节 / 其它作品前
+  - 切换到其它章节 / 其它书前
   - 退出登录、关闭窗口前（监听 `beforeunload` / Tauri 关闭事件）
 - Ctrl+S 走 `save()`，会同时取消当前待触发的自动保存定时器。
 - 组件卸载（`onUnmounted`）时清除定时器，防止泄漏与对已切换章节的误写。
@@ -438,7 +438,7 @@ save():
 - 因后端 HTTP 恒 200，保留 `res.ok` 判断真正的传输错误；解析 envelope 后：
   - `code === 401` → `tokenStore.clearToken()` 并触发回到登录页，再抛错
   - `code !== 200` → 抛出 `message`
-- 新增 `api/work.ts`、`api/chapter.ts` 封装各接口，类型取自 `types/chapter.ts`
+- 新增 `api/book.ts`、`api/chapter.ts` 封装各接口，类型取自 `types/chapter.ts`
 
 ### 6.9 前端文件规划
 
@@ -447,26 +447,26 @@ front-end/src/
 ├── App.vue                      # 改：登录 / 书架 / 编辑页 三态切换
 ├── views/
 │   ├── LoginView.vue            # 新增：迁移登录 UI
-│   ├── BookshelfView.vue        # 新增：书架（作品卡片网格）
-│   └── WorkspaceView.vue        # 新增：两段式编辑页（章节列表 + 编辑区）
+│   ├── BookshelfView.vue        # 新增：书架（书卡片网格）
+│   └── EditorView.vue        # 新增：两段式编辑页（章节列表 + 编辑区）
 ├── components/
-│   ├── WorkCard.vue             # 新增：书架单个作品卡片
+│   ├── BookCard.vue             # 新增：书架单个书卡片
 │   ├── ChapterList.vue          # 新增
 │   └── ChapterEditor.vue        # 新增
 ├── composables/
 │   ├── useAuth.ts               # 改：token 持久化
-│   ├── useWorks.ts              # 新增
+│   ├── useBooks.ts              # 新增
 │   └── useChapters.ts           # 新增
 ├── api/
 │   ├── tokenStore.ts            # 新增：token 读写
 │   ├── http.ts                  # 改：注入 token / 处理 code 401
 │   ├── auth.ts                  # 复用
-│   ├── work.ts                  # 新增
+│   ├── book.ts                  # 新增
 │   └── chapter.ts               # 新增
 └── types/
     ├── api.ts                   # 复用
     ├── auth.ts                  # 复用
-    └── chapter.ts               # 新增：Work / WorkSummary / Chapter / ChapterSummary
+    └── chapter.ts               # 新增：Book / BookSummary / Chapter / ChapterSummary
 ```
 
 依赖：`front-end` 新增 `spark-md5` 及其类型 `@types/spark-md5`。
@@ -477,16 +477,16 @@ front-end/src/
 
 1. LoginView 提交账号密码 → `POST /login`
 2. 后端 `AuthService.login` 校验成功 → `createToken`（HMAC 签名）→ 返回 token
-3. 前端 `tokenStore.setToken`，`App.vue` 检测到 token 且 `currentWorkId` 为空 → 渲染 BookshelfView
-4. BookshelfView 挂载 → `useWorks.loadList()` 加载作品列表，卡片网格展示
+3. 前端 `tokenStore.setToken`，`App.vue` 检测到 token 且 `currentBookId` 为空 → 渲染 BookshelfView
+4. BookshelfView 挂载 → `useBooks.loadList()` 加载书列表，卡片网格展示
 
 ### 7.2 选书进入编辑页 → 选章 → 编辑
 
-1. 在书架点击某本书 → `useWorks.open(workId)` 设置 `currentId` → `App.vue` 切到 WorkspaceView
-2. WorkspaceView 挂载 → `useChapters.loadList(workId)`（`GET /works/:workId/chapters`）
+1. 在书架点击某本书 → `useBooks.open(bookId)` 设置 `currentId` → `App.vue` 切到 EditorView
+2. EditorView 挂载 → `useChapters.loadList(bookId)`（`GET /books/:bookId/chapters`）
 3. 点击章节 → `useChapters.select(id)` → `GET /chapters/:id`；后端经 work 归属校验后返回详情
 4. `current` 更新，`savedHash = contentHash` → ChapterEditor 显示标题与正文
-5. 点顶栏"← 返回书架"：若 `dirty` 先 `flush()`，再 `useWorks.backToShelf()` 清空 `currentId` 回到 BookshelfView
+5. 点顶栏"← 返回书架"：若 `dirty` 先 `flush()`，再 `useBooks.backToShelf()` 清空 `currentId` 回到 BookshelfView
 
 ### 7.3 保存（手动 Ctrl+S / 空闲自动保存 + hash 判重）
 
@@ -494,7 +494,7 @@ front-end/src/
 
 - **手动**：ChapterEditor 捕获 Ctrl+S / Cmd+S，`preventDefault` 阻止 Webview 默认保存 → `save()`
 - **自动**：输入变更 → `scheduleAutoSave()` 防抖排期，停止输入满 `AUTOSAVE_IDLE_MS` 后触发 `save()`
-- **强制落盘**：切换章节/作品、退出/关窗前，若 `dirty` 则 `flush()` 立即 `save()`
+- **强制落盘**：切换章节/书、退出/关窗前，若 `dirty` 则 `flush()` 立即 `save()`
 
 `save()` 内部流程：
 
@@ -507,14 +507,14 @@ front-end/src/
 
 ### 7.4 新建 / 删除
 
-- 新建作品：书架点"+ 新建作品" → `POST /works` → 追加到书架卡片（可选：新建后直接 `open` 进入编辑页）
-- 删除作品：书架卡片上确认删除 → `DELETE /works/:id`（级联删章节）→ 从书架移除
-- 新建章节：编辑页点"+ 新建" → `POST /works/:workId/chapters` → 追加到章节列表并选中
+- 新建书：书架点"+ 新建书" → `POST /books` → 追加到书架卡片（可选：新建后直接 `open` 进入编辑页）
+- 删除书：书架卡片上确认删除 → `DELETE /books/:id`（级联删章节）→ 从书架移除
+- 新建章节：编辑页点"+ 新建" → `POST /books/:bookId/chapters` → 追加到章节列表并选中
 - 删除章节：确认后 `DELETE /chapters/:id` → 从列表移除；若删的是当前章节，清空编辑区
 
 ## 8. 安全性考虑
 
-- **越权防护**：`userId` 一律来自 `checkAuth`，不信任前端传参；作品接口校验 `t_work.user_id`，章节接口经 `work_id` 关联作品校验，杜绝跨用户访问。
+- **越权防护**：`userId` 一律来自 `checkAuth`，不信任前端传参；书接口校验 `t_book.user_id`，章节接口经 `book_id` 关联书校验，杜绝跨用户访问。
 - **认证链路**：无状态 HMAC-SHA256 签名 token，`uid`/`exp` 经签名防篡改；密钥 `TOKEN_SECRET` 经环境变量注入，不入代码库。验签不查库，`userId` 直接取自 payload。
 - **口令存储**：`t_user.password` 现为明文（演示数据），生产应哈希存储（bcrypt/argon2）。本期不改，标注为已知风险。
 - **传输**：前端经 Tauri HTTP 插件走 HTTPS，绕过浏览器 CORS；后端保留 CORS 头以兼容浏览器调试。
@@ -528,10 +528,10 @@ front-end/src/
 
 ## 10. 实施顺序建议
 
-1. 后端迁移：`0002_work_chapter.sql`（建 t_work / t_chapter），本地应用（`t_login_log` 无需改动）
+1. 后端迁移：`0002_book_chapter.sql`（建 t_book / t_chapter），本地应用（`t_login_log` 无需改动）
 2. 后端认证：配置 `TOKEN_SECRET`（本地 `.dev.vars`，线上 `wrangler secret`）、`Env` 类型加 `TOKEN_SECRET`；实现 `token.ts` 的 HMAC 签发/验签（async）、`AuthService.login` 签发 token、`auth.ts` 无状态验签取 userId、`route.ts` 的 401 改走 `jsonResponse`
-3. 后端上下文与业务：新增 `context.ts`（`Ctx` + 每请求构造），`route.ts` 构造/分派 `Ctx`；`WorkService` / `ChapterService`（含归属校验、hash 比对、显式 update_time）、`controller/work.ts` / `chapter.ts`（`(ctx) => Response`，调用 service 传原始参数）
+3. 后端上下文与业务：新增 `context.ts`（`Ctx` + 每请求构造），`route.ts` 构造/分派 `Ctx`；`BookService` / `ChapterService`（含归属校验、hash 比对、显式 update_time）、`controller/book.ts` / `chapter.ts`（`(ctx) => Response`，调用 service 传原始参数）
 4. 前端基础：`tokenStore`、改造 `http.ts`（注入 token / 处理 code 401）与 `useAuth`（持久化）
-5. 前端数据层：引入 `spark-md5`，新增 `types/chapter.ts`、`api/work.ts`、`api/chapter.ts`、`useWorks`、`useChapters`（含 `save`/`scheduleAutoSave`/`flush` 与判重）
-6. 前端界面：拆分 LoginView，新增 BookshelfView（书架 + WorkCard）、WorkspaceView（两段式：ChapterList + ChapterEditor），改造 App.vue 做登录/书架/编辑页三态切换
-7. 联调全流程：登录 → 作品列表 → 选作品 → 章节列表 → 选章节 → 编辑 → Ctrl+S（验证无变更不发请求、有变更写库）→ 新建/删除作品与章节 → 退出登录
+5. 前端数据层：引入 `spark-md5`，新增 `types/chapter.ts`、`api/book.ts`、`api/chapter.ts`、`useBooks`、`useChapters`（含 `save`/`scheduleAutoSave`/`flush` 与判重）
+6. 前端界面：拆分 LoginView，新增 BookshelfView（书架 + BookCard）、EditorView（两段式：ChapterList + ChapterEditor），改造 App.vue 做登录/书架/编辑页三态切换
+7. 联调全流程：登录 → 书列表 → 选书 → 章节列表 → 选章节 → 编辑 → Ctrl+S（验证无变更不发请求、有变更写库）→ 新建/删除书与章节 → 退出登录
