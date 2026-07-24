@@ -37,20 +37,26 @@ async function onRemove(id: number) {
     <main class="content">
       <h2>我的书架</h2>
       <p v-if="error" class="error">{{ error }}</p>
-      <p v-if="loading" class="hint">加载中…</p>
 
-      <div class="grid">
-        <BookCard
-          v-for="book in list"
-          :key="book.id"
-          :book="book"
-          @open="open"
-          @remove="onRemove"
-        />
-        <button class="add" @click="onCreate">
-          <span class="plus">+</span>
-          <span>新建书籍</span>
-        </button>
+      <div class="grid-wrap">
+        <div class="grid">
+          <BookCard
+            v-for="book in list"
+            :key="book.id"
+            :book="book"
+            @open="open"
+            @remove="onRemove"
+          />
+          <button class="add" @click="onCreate">
+            <span class="plus">+</span>
+            <span>新建书籍</span>
+          </button>
+        </div>
+
+        <div v-if="loading" class="loading-overlay">
+          <span class="spinner"></span>
+          <span>加载中…</span>
+        </div>
       </div>
     </main>
   </div>
@@ -116,8 +122,38 @@ h2 {
   color: #e03131;
 }
 
-.hint {
-  color: #888;
+.grid-wrap {
+  position: relative;
+  min-height: 168px;
+}
+
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  color: #666;
+  font-size: 0.9rem;
+  background: rgba(250, 250, 250, 0.6);
+  backdrop-filter: blur(1px);
+  z-index: 2;
+}
+
+.spinner {
+  width: 1.1rem;
+  height: 1.1rem;
+  border: 2px solid #c7d2fe;
+  border-top-color: #4f7cff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .grid {

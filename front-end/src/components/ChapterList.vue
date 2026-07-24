@@ -20,8 +20,9 @@ const emit = defineEmits<{
       <button class="add" title="新建章节" @click="emit('create')">+</button>
     </div>
 
-    <p v-if="loading" class="hint">加载中…</p>
-    <p v-else-if="chapters.length === 0" class="hint">还没有章节，点击 + 新建</p>
+    <p v-if="!loading && chapters.length === 0" class="hint">
+      还没有章节，点击 + 新建
+    </p>
 
     <ul>
       <li
@@ -36,11 +37,17 @@ const emit = defineEmits<{
         </button>
       </li>
     </ul>
+
+    <div v-if="loading" class="loading-overlay">
+      <span class="spinner"></span>
+      <span>加载中…</span>
+    </div>
   </aside>
 </template>
 
 <style scoped>
 .list {
+  position: relative;
   width: 240px;
   flex-shrink: 0;
   border-right: 1px solid #eee;
@@ -48,6 +55,35 @@ const emit = defineEmits<{
   display: flex;
   flex-direction: column;
   overflow-y: auto;
+}
+
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  color: #666;
+  font-size: 0.85rem;
+  background: rgba(250, 250, 250, 0.6);
+  backdrop-filter: blur(1px);
+  z-index: 2;
+}
+
+.spinner {
+  width: 1.1rem;
+  height: 1.1rem;
+  border: 2px solid #c7d2fe;
+  border-top-color: #4f7cff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .head {

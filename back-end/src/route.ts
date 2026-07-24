@@ -1,4 +1,5 @@
-import { login } from "./controller/login";
+import { login, register } from "./controller/login";
+import * as userController from "./controller/user";
 import * as bookController from "./controller/book";
 import * as chapterController from "./controller/chapter";
 import { checkAuth } from "./middleware/auth";
@@ -10,9 +11,16 @@ export async function router(ctx: Ctx): Promise<Response> {
   const { method } = ctx;
   const segments = ctx.url.pathname.split("/").filter(Boolean);
 
-  // Login is public.
+  // Login and register are public.
   if (method === "POST" && segments.length === 1 && segments[0] === "login") {
     return login(ctx);
+  }
+  if (
+    method === "POST" &&
+    segments.length === 1 &&
+    segments[0] === "register"
+  ) {
+    return register(ctx);
   }
 
   // Everything else requires a valid token.
@@ -21,6 +29,11 @@ export async function router(ctx: Ctx): Promise<Response> {
     return jsonResponse(null, 401, auth.message ?? "未登录");
   }
   ctx.userId = auth.userId!;
+
+  // /me — current user info
+  if (method === "GET" && segments.length === 1 && segments[0] === "me") {
+    return userController.me(ctx);
+  }
 
   // /books
   if (segments.length === 1 && segments[0] === "books") {

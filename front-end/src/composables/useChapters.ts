@@ -39,12 +39,21 @@ export function useChapters() {
     }
   }
 
+  /** Reset all chapter state synchronously (e.g. when opening a book). */
+  function reset(): void {
+    clearAutoSaveTimer();
+    list.value = [];
+    current.value = null;
+    savedHash.value = null;
+  }
+
   async function loadList(bookId: number): Promise<void> {
+    // Clear stale state up front so the editor doesn't flash the previously
+    // opened chapter while the new list is loading.
+    reset();
     loading.value = true;
     try {
       list.value = await chapterApi.listChapters(bookId);
-      current.value = null;
-      savedHash.value = null;
     } finally {
       loading.value = false;
     }

@@ -51,3 +51,22 @@ export interface TokenCheck {
   success: boolean;
   userId?: number;
 }
+
+/** Row shape for t_user. */
+export interface UserRow {
+  id: number;
+  username: string;
+  password: string;
+  nickname: string | null;
+  avatar: string | null;
+  create_time: string;
+  update_time: string;
+}
+
+/** Current user info returned to the client (no password). */
+export interface UserInfo {
+  id: number;
+  username: string;
+  nickname: string | null;
+  avatar: string | null;
+}
