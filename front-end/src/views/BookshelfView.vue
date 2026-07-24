@@ -2,6 +2,9 @@
 import { onMounted, onUnmounted, ref, computed } from "vue";
 import type { useBooks } from "../composables/useBooks";
 import BookCard from "../components/BookCard.vue";
+import { useConfirm } from "../composables/useConfirm";
+
+const confirm = useConfirm();
 
 const props = defineProps<{
   books: ReturnType<typeof useBooks>;
@@ -27,9 +30,12 @@ async function onCreate() {
 }
 
 async function onRemove(id: number) {
-  if (confirm("确定删除这本书及其所有章节？")) {
-    await remove(id);
-  }
+  const ok = await confirm({
+    title: "删除书籍？",
+    message: "删除后将删除所有章节，\n该操作不可恢复。",
+    confirmText: "删除",
+  });
+  if (ok) await remove(id);
 }
 
 // --- user menu ---------------------------------------------------------------

@@ -13,6 +13,7 @@ import type { UserInfo } from "./types/auth";
 import LoginView from "./views/LoginView.vue";
 import BookshelfView from "./views/BookshelfView.vue";
 import EditorView from "./views/EditorView.vue";
+import ConfirmDialog from "./components/dialog/ConfirmDialog.vue";
 
 const loggedIn = sessionRef();
 const books = useBooks();
@@ -80,6 +81,9 @@ async function onLogout() {
     :username="displayName"
     @logout="onLogout"
   />
+
+  <!-- 全局统一确认弹窗：整个项目共用此实例 -->
+  <ConfirmDialog />
 </template>
 
 <style>

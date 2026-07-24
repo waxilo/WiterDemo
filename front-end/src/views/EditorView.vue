@@ -4,6 +4,9 @@ import type { useBooks } from "../composables/useBooks";
 import type { useChapters } from "../composables/useChapters";
 import ChapterList from "../components/ChapterList.vue";
 import ChapterEditor from "../components/ChapterEditor.vue";
+import { useConfirm } from "../composables/useConfirm";
+
+const confirm = useConfirm();
 
 const props = defineProps<{
   books: ReturnType<typeof useBooks>;
@@ -107,7 +110,12 @@ async function onCreate() {
 }
 
 async function onRemove(id: number) {
-  if (confirm("确定删除该章节？")) await remove(id);
+  const ok = await confirm({
+    title: "删除章节？",
+    message: "删除后无法恢复。",
+    confirmText: "删除",
+  });
+  if (ok) await remove(id);
 }
 
 function onReorder(ids: number[]) {
