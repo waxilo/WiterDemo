@@ -107,6 +107,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 .paper {
   --line: 36px;
   --bind: 48px;
+  --rule-offset: -6px;
   box-sizing: border-box;
   width: 100%;
   min-height: 100%;
@@ -142,7 +143,11 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
   background-repeat: no-repeat, repeat-y, no-repeat;
   background-origin: border-box, content-box, border-box;
   background-clip: border-box, content-box, border-box;
-  background-position: 0 0, 0 0, 0 0;
+  /*
+   * Chinese glyphs sit above the bottom of their line box. Lift the rule so
+   * it follows the visual baseline instead of leaving a large gap below text.
+   */
+  background-position: 0 0, 0 var(--rule-offset), 0 0;
 }
 
 .paper.is-empty::before {
@@ -205,6 +210,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
   .paper {
     --line: 32px;
     --bind: 12px;
+    --rule-offset: -6px;
     padding: 28px 18px 56px;
     font-size: 16px;
     text-align: left;
