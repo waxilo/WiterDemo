@@ -30,7 +30,7 @@ const items = ref<ChapterSummary[]>([...props.chapters]);
 const dragIndex = ref<number | null>(null);
 const overIndex = ref<number | null>(null);
 const mobileQuery = window.matchMedia(MOBILE_BREAKPOINT);
-const isCollapsed = ref(mobileQuery.matches);
+const isCollapsed = ref(false);
 const editingId = ref<number | null>(null);
 const titleDraft = ref("");
 const titleInput = ref<HTMLInputElement | null>(null);
@@ -221,8 +221,9 @@ function removeFromMenu(): void {
   if (id !== null) emit("remove", id);
 }
 
-function onViewportChange(event: MediaQueryListEvent) {
-  isCollapsed.value = event.matches;
+function onViewportChange(): void {
+  // Keep the user's open/closed preference across breakpoints.
+  // Mobile should also start expanded when entering a book.
   closeContextMenu();
 }
 

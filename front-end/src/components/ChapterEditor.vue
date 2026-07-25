@@ -45,16 +45,23 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 <template>
   <section class="desk">
     <template v-if="current">
-      <article
-        :key="current.id"
-        class="paper"
-        :class="{ 'is-empty': isEmpty }"
-        data-placeholder="开始写作……"
-        contenteditable="plaintext-only"
-        spellcheck="false"
-        ref="editorRef"
-        @input="onInput"
-      ></article>
+      <!--
+        Scroll on the outer frame so the paper can grow with content.
+        Background rules live on .paper (not the scrollport), which avoids
+        mobile Safari cutting off lines and drifting with attachment: local.
+      -->
+      <div class="paper-scroll">
+        <article
+          :key="current.id"
+          class="paper"
+          :class="{ 'is-empty': isEmpty }"
+          data-placeholder="开始写作……"
+          contenteditable="plaintext-only"
+          spellcheck="false"
+          ref="editorRef"
+          @input="onInput"
+        ></article>
+      </div>
     </template>
 
     <div v-else class="placeholder-state">
@@ -64,7 +71,6 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 </template>
 
 <style scoped>
-/* Writing desk: warm neutral backdrop that frames the sheet. */
 .desk {
   flex: 1;
   min-width: 0;
@@ -77,26 +83,34 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
   overflow: hidden;
 }
 
+.paper-scroll {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  max-width: 780px;
+  width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border-radius: 12px 12px 0 0;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.06);
+  background: #fffdf8;
+  animation: paper-in 0.28s ease both;
+}
+
 /*
- * The sheet. A single centered page that scrolls internally, so it stays put
- * (and stays centered) while you write.
- *
- * The manuscript rules are pure CSS, layered as three backgrounds:
- *   1. left binding line  (border-box, full height)
- *   2. faint writing rules (content-box, so top/side margins stay clean)
- *   3. solid paper fill    (border-box)
- * background-attachment: local keeps the rules scrolling with the text, so
- * every line always sits on a rule.
+ * Manuscript rules:
+ *   1. left binding line
+ *   2. ruled lines tiled exactly to --line (must match line-height)
+ *   3. paper fill
+ * Tile height uses background-size so text never drifts from the rules.
  */
 .paper {
   --line: 36px;
+  --bind: 48px;
   box-sizing: border-box;
   width: 100%;
-  max-width: 780px;
-  height: 100%;
-  overflow-y: auto;
+  min-height: 100%;
   padding: 72px 72px 96px;
-  border-radius: 12px 12px 0 0;
   outline: none;
   border: none;
 
@@ -114,26 +128,23 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
   background-image:
     linear-gradient(
       to right,
-      transparent 0 47px,
-      rgba(255, 120, 120, 0.18) 47px 48px,
-      transparent 48px
+      transparent 0 calc(var(--bind) - 1px),
+      rgba(255, 120, 120, 0.18) calc(var(--bind) - 1px) var(--bind),
+      transparent var(--bind)
     ),
-    repeating-linear-gradient(
+    linear-gradient(
       to bottom,
-      transparent 0 35px,
-      rgba(120, 120, 120, 0.12) 35px 36px
+      transparent calc(var(--line) - 1px),
+      rgba(120, 120, 120, 0.12) 0
     ),
     linear-gradient(#fffdf8, #fffdf8);
-  background-repeat: no-repeat, repeat, no-repeat;
+  background-size: 100% 100%, 100% var(--line), 100% 100%;
+  background-repeat: no-repeat, repeat-y, no-repeat;
   background-origin: border-box, content-box, border-box;
   background-clip: border-box, content-box, border-box;
-  background-attachment: local, local, local;
-
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.06);
-  animation: paper-in 0.28s ease both;
+  background-position: 0 0, 0 0, 0 0;
 }
 
-/* placeholder for the empty contenteditable */
 .paper.is-empty::before {
   content: attr(data-placeholder);
   color: #bbb;
@@ -144,18 +155,17 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
   background: rgba(79, 110, 247, 0.15);
 }
 
-/* subtle scrollbar so it doesn't intrude on the page feel */
-.paper::-webkit-scrollbar {
+.paper-scroll::-webkit-scrollbar {
   width: 10px;
 }
 
-.paper::-webkit-scrollbar-thumb {
+.paper-scroll::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.12);
   border: 3px solid #fffdf8;
   border-radius: 999px;
 }
 
-.paper::-webkit-scrollbar-thumb:hover {
+.paper-scroll::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 0, 0, 0.2);
 }
 
@@ -170,7 +180,6 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
   }
 }
 
-/* empty state (no chapter selected) */
 .placeholder-state {
   flex: 1;
   display: flex;
@@ -187,34 +196,25 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
     padding: 8px 8px 0;
   }
 
-  .paper {
-    --line: 32px;
+  .paper-scroll {
     max-width: none;
-    padding: 28px 18px 56px;
     border-radius: 10px 10px 0 0;
-    font-size: 16px;
-    text-align: left;
-    background-image:
-      linear-gradient(
-        to right,
-        transparent 0 11px,
-        rgba(255, 120, 120, 0.14) 11px 12px,
-        transparent 12px
-      ),
-      repeating-linear-gradient(
-        to bottom,
-        transparent 0 31px,
-        rgba(120, 120, 120, 0.1) 31px 32px
-      ),
-      linear-gradient(#fffdf8, #fffdf8);
     box-shadow: 0 6px 24px rgba(0, 0, 0, 0.05);
   }
 
-  .paper::-webkit-scrollbar {
+  .paper {
+    --line: 32px;
+    --bind: 12px;
+    padding: 28px 18px 56px;
+    font-size: 16px;
+    text-align: left;
+  }
+
+  .paper-scroll::-webkit-scrollbar {
     width: 4px;
   }
 
-  .paper::-webkit-scrollbar-thumb {
+  .paper-scroll::-webkit-scrollbar-thumb {
     border-width: 1px;
   }
 }
