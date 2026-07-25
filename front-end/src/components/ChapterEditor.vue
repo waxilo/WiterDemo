@@ -7,6 +7,9 @@ const { current, save, scheduleAutoSave } = props.chapters;
 
 const editorRef = ref<HTMLElement | null>(null);
 
+/** Indent inserted by Tab while writing. */
+const TAB_INDENT = "\t";
+
 /** Placeholder shows only when the current chapter has no content. */
 const isEmpty = computed(() => !current.value?.content);
 
@@ -38,6 +41,29 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
+/** Insert indent at the caret instead of moving focus out of the editor. */
+function onEditorKeydown(e: KeyboardEvent) {
+  if (e.key !== "Tab" || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  e.preventDefault();
+  if (!current.value || !editorRef.value) return;
+
+  const inserted = document.execCommand("insertText", false, TAB_INDENT);
+  if (!inserted) {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+    const range = selection.getRangeAt(0);
+    range.deleteContents();
+    const textNode = document.createTextNode(TAB_INDENT);
+    range.insertNode(textNode);
+    range.setStartAfter(textNode);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    current.value.content = editorRef.value.innerText;
+    scheduleAutoSave();
+  }
+}
+
 onMounted(() => window.addEventListener("keydown", onKeydown));
 onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 </script>
@@ -60,6 +86,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
           spellcheck="false"
           ref="editorRef"
           @input="onInput"
+          @keydown="onEditorKeydown"
         ></article>
       </div>
     </template>
@@ -124,6 +151,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
   text-align: justify;
   word-break: break-word;
   white-space: pre-wrap;
+  tab-size: 2;
 
   background-color: #fffdf8;
   background-image:
