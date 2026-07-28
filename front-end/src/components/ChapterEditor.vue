@@ -270,12 +270,12 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
   .paper {
     /*
      * 手机端只需声明字号和行高倍数，横线抬升量（--rule-offset）由 .paper
-     * 里的公式自动推导。18px × 2.2 = 39.6px，取整后为 40px 行距。
+     * 里的公式自动推导。16px × 2.2 = 35.2px，取整后为 35px 行距。
      */
-    --font-size: 18px;
+    --font-size: 16px;
     --line-height: 2.2;
-    /* 兜底值 = round(18 × 2.2) = 40px */
-    --line: 40px;
+    /* 兜底值 = round(16 × 2.2) = 35px */
+    --line: 35px;
     --bind: 12px;
     padding: 28px 18px 56px;
     text-align: left;
