@@ -129,12 +129,34 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
  *   1. left binding line
  *   2. ruled lines tiled exactly to --line (must match line-height)
  *   3. paper fill
- * Tile height uses background-size so text never drifts from the rules.
+ *
+ * 对齐原理（改字号时只需要动 --font-size / --line-height）：
+ *
+ *   --line = --font-size × --line-height
+ *
+ * 同一个 --line 同时喂给 line-height 和 background-size，横线间距与行盒
+ * 高度天然 1:1，不存在按设备/字体漂移的固定行高值。
+ *
+ * --rule-offset 是横线相对行盒底部的抬升量，也由字号推导，不再手调：
+ * 行盒内的 half-leading 上下对称，所以 CJK 字身框近似以行盒中心为中心，
+ * 字身框底部 ≈ --line / 2 + --font-size / 2。横线默认画在行盒底部
+ * (--line - 1px)，把它移到「字身框底部 + --rule-gap」即得
+ *
+ *   offset = (--font-size - --line) / 2 + --rule-gap + 1px
+ *
+ * 该式在任意字号下自洽，且与此前手调的 PC 值（36px 行距 → -6px）完全一致，
+ * 所以桌面端观感不变。因为只依赖 half-leading 对称，换字体也不会失准。
  */
 .paper {
-  --line: 36px;
+  --font-size: 18px;
+  --line-height: 2;
+  --line: calc(var(--font-size) * var(--line-height));
+  /* 文字视觉底部与横线之间留出的呼吸间隙 */
+  --rule-gap: 2px;
+  --rule-offset: calc(
+    (var(--font-size) - var(--line)) / 2 + var(--rule-gap) + 1px
+  );
   --bind: 48px;
-  --rule-offset: -6px;
   box-sizing: border-box;
   width: 100%;
   min-height: 100%;
@@ -144,7 +166,11 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 
   font-family: "Source Han Serif SC", "Noto Serif SC", "Songti SC", "STSong",
     "思源宋体", serif;
-  font-size: 18px;
+  font-size: var(--font-size);
+  /*
+   * 用派生出的 px 值而不是无单位的 --line-height：无单位行高由浏览器各自
+   * 做亚像素舍入，会和精确平铺的背景 tile 逐行拉开差距。
+   */
   line-height: var(--line);
   color: #333;
   caret-color: #4f6ef7;
@@ -236,11 +262,15 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
   }
 
   .paper {
-    --line: 32px;
+    /*
+     * 手机端只需声明字号和行高倍数，横线间距（--line）与横线抬升量
+     * （--rule-offset）由 .paper 里的公式自动推导，不再手填像素值。
+     * 18px × 2.2 = 39.6px 行距。
+     */
+    --font-size: 18px;
+    --line-height: 2.2;
     --bind: 12px;
-    --rule-offset: -6px;
     padding: 28px 18px 56px;
-    font-size: 16px;
     text-align: left;
   }
 
