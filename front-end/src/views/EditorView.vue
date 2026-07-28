@@ -682,16 +682,22 @@ function onReorder(ids: number[]) {
   transform: translateY(-3px);
 }
 
-@media (max-width: 760px) {
+/*
+ * ---- 移动端阅读布局（≤768px）----
+ * 顶栏：返回按钮固定左侧 | 标题 + 章节信息居中一行 | 头像固定右侧
+ */
+@media (max-width: 768px) {
   .topbar {
-    height: 56px;
-    grid-template-columns: 44px minmax(0, 1fr) 52px;
-    padding: 0 8px;
+    /* 压缩上下空间，把高度让给正文 */
+    height: 52px;
+    grid-template-columns: 40px minmax(0, 1fr) 40px;
+    padding: 0 6px;
   }
 
   .bar-center {
     width: 100%;
     max-width: none;
+    gap: 1px;
   }
 
   .bar-right {
@@ -714,19 +720,25 @@ function onReorder(ids: number[]) {
 
   .book-title {
     max-width: 100%;
-    padding-inline: 0.35em;
-    font-size: 16px;
+    padding: 0 0.25em;
+    font-size: 15px;
+    line-height: 1.3;
     text-align: center;
   }
 
+  /* 章节号 · 字数 · 保存态：始终压在一行内，超出则省略 */
   .writing-meta {
+    min-height: 14px;
     gap: 3px;
     font-size: 11px;
+    overflow: hidden;
+    flex-wrap: nowrap;
   }
 
   .book-title-input {
     min-width: 0;
-    font-size: 16px;
+    padding: 0.1em 0.4em;
+    font-size: 15px;
   }
 
   .status {
@@ -743,13 +755,13 @@ function onReorder(ids: number[]) {
   }
 
   .avatar {
-    width: 32px;
-    height: 32px;
+    width: 30px;
+    height: 30px;
   }
 
   .menu {
     position: fixed;
-    top: 62px;
+    top: 56px;
     right: 8px;
   }
 

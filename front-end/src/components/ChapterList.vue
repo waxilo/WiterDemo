@@ -3,7 +3,8 @@ import { nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { ChapterSummary } from "../types/chapter";
 import { formatCount } from "../utils/textStats";
 
-const MOBILE_BREAKPOINT = "(max-width: 760px)";
+/** 与各组件 CSS 里的移动端断点保持一致。 */
+const MOBILE_BREAKPOINT = "(max-width: 768px)";
 const CONTEXT_MENU_WIDTH = 168;
 const CONTEXT_MENU_HEIGHT = 132;
 const LONG_PRESS_MS = 480;
@@ -741,7 +742,7 @@ function finishDrag() {
   }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 768px) {
   .sidebar {
     position: absolute;
     inset: 0 auto 0 0;
