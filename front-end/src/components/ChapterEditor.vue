@@ -224,74 +224,32 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
   font-size: 0.95rem;
 }
 
-/*
- * ---- 移动端阅读布局（≤768px）----
- * 目标：接近微信读书 / 番茄小说的沉浸式阅读体验。
- * 纸张铺满整屏，不再缩放 PC 版式；左右留白由 .paper 的 padding 承担。
- */
-@media (max-width: 768px) {
+@media (max-width: 760px) {
   .desk {
-    /* 内容区占满屏宽，取消 PC 的桌面留白 */
-    padding: 0;
-    overflow-x: hidden;
+    padding: 8px 8px 0;
   }
 
   .paper-scroll {
-    /* 移除 PC 的 780px 固定宽度限制 */
     max-width: none;
-    width: 100%;
-    border-radius: 0;
-    box-shadow: none;
-    /* 自然纵向滚动，且不把滚动传递给外层 */
-    overscroll-behavior-y: contain;
-    -webkit-overflow-scrolling: touch;
+    border-radius: 10px 10px 0 0;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.05);
   }
 
   .paper {
-    /*
-     * 稿纸横线必须与行高 1:1 对齐，否则文字会从横线上漂走。
-     * 18px 正文 + 40px 行高 ≈ 2.2 倍行距，横线密度相比原来的 32px
-     * 降低约 25%，接近真实稿纸又不干扰阅读。
-     */
-    --line: 40px;
-    --bind: 10px;
-    /* 行高变大后中文字形离行底更远，横线要多抬一点才贴着视觉基线 */
-    --rule-offset: -8px;
-
-    /*
-     * 上留白同时避开章节栏收起后的悬浮按钮（left/top 12px，36px 见方），
-     * 左右 22px 落在 20~24px 的舒适区间。
-     */
-    padding: 56px 22px 72px;
-
-    font-family: "Noto Serif SC", "Source Han Serif SC", "思源宋体",
-      "Source Han Serif CN", "Songti SC", "STSong", serif;
-    font-size: 18px;
-    letter-spacing: 0.01em;
-    /* 窄屏两端对齐会拉出难看的字间空隙，改为左对齐 + 自然换行 */
+    --line: 32px;
+    --bind: 12px;
+    --rule-offset: -6px;
+    padding: 28px 18px 56px;
+    font-size: 16px;
     text-align: left;
-    word-break: break-word;
-    overflow-wrap: break-word;
-
-    /* 文字渲染优化 */
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-    text-rendering: optimizeLegibility;
-
-    /*
-     * 首行缩进沿用写作时插入的制表符（TAB_INDENT + tab-size: 2），
-     * 正好等于 2 个汉字宽度。这里不叠加 text-indent，否则第一段会缩进 4 字。
-     */
-    tab-size: 2;
   }
 
-  /* 细滚动条：手机端本身用系统 overlay，这里主要照顾窄窗口的桌面浏览器 */
   .paper-scroll::-webkit-scrollbar {
-    width: 3px;
+    width: 4px;
   }
 
   .paper-scroll::-webkit-scrollbar-thumb {
-    border: none;
+    border-width: 1px;
   }
 }
 </style>
