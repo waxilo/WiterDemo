@@ -57,7 +57,7 @@ export async function refresh(ctx: Ctx): Promise<Response> {
   const {
     token: newRefresh,
     jti: newJti,
-    expMs,
+    ttlMs,
   } = await createRefreshToken(check.uid, ctx.env);
   await sessionService.rotateSession(
     ctx.env,
@@ -65,7 +65,7 @@ export async function refresh(ctx: Ctx): Promise<Response> {
     check.jti,
     newJti,
     newRefresh,
-    expMs
+    ttlMs
   );
 
   return jsonResponse({
