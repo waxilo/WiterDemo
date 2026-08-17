@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "tauri-vue-demo",
+  "productName": "写作助手",
   "version": "0.1.0",
   "identifier": "com.sloanwang.tauri-vue-demo",
   "build": {
@@ -12,13 +12,14 @@
   "app": {
     "windows": [
       {
-        "title": "tauri-vue-demo",
+        "title": "写作助手",
         "width": 800,
         "height": 600
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src https://api.sloan.dpdns.org; font-src 'self'",
+      "devCsp": "default-src 'self' http://localhost:1420; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src https://api.sloan.dpdns.org http://localhost:1420 ws://localhost:* http://localhost:*; font-src 'self'"
     }
   },
   "bundle": {

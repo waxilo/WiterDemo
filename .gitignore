@@ -4,3 +4,5 @@ node_modules/
 worker-configuration.d.ts
 dist/
 .vscode/
+.npm-cache/
+.DS_Store
