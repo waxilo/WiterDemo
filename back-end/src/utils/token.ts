@@ -97,6 +97,15 @@ async function signJwt(
   return `${signingInput}.${signature}`;
 }
 
+/** Constant-time byte comparison (works on Workers and Node, unlike
+ *  `crypto.subtle.timingSafeEqual` which is a Workers-only extension). */
+function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.byteLength !== b.byteLength) return false;
+  let diff = 0;
+  for (let i = 0; i < a.byteLength; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
+}
+
 /** Verify a JWT's signature and expiry with the given secret; return payload. */
 async function verifyJwt<T extends AnyPayload>(
   token: string,
@@ -111,10 +120,7 @@ async function verifyJwt<T extends AnyPayload>(
   const expected = await sign(signingInput, secret);
   const sigBytes = new TextEncoder().encode(signature);
   const expectedBytes = new TextEncoder().encode(expected);
-  if (
-    sigBytes.byteLength !== expectedBytes.byteLength ||
-    !crypto.subtle.timingSafeEqual(sigBytes, expectedBytes)
-  ) {
+  if (!constantTimeEqual(sigBytes, expectedBytes)) {
     return null;
   }
 

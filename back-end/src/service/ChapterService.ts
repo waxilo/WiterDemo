@@ -1,10 +1,20 @@
 import type { Chapter, ChapterRow, ChapterSummary } from "../types";
 import { getOwnedBook } from "./BookService";
+import { ApiError } from "../errors";
+import { sha256Hex } from "../utils/token";
 
 export interface SaveChapterInput {
   title: string;
   content: string;
-  hash?: string;
+  /**
+   * The `version` the client loaded. The write itself is conditioned on it
+   * (`WHERE version = ?`), so concurrent saves are serialized atomically:
+   * exactly one succeeds, the loser gets 409. Prefer this over baseUpdateTime
+   * (second-precision timestamps let same-second saves slip through).
+   */
+  baseVersion?: number;
+  /** Legacy lock (kept for compatibility); version takes precedence. */
+  baseUpdateTime?: string;
 }
 
 const CJK_CHARACTER_PATTERN = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/g;
@@ -29,7 +39,8 @@ function toSummary(row: ChapterRow): ChapterSummary {
     title: row.title,
     sortOrder: row.sort_order,
     updateTime: row.update_time,
-    ...getContentStats(row.content),
+    wordCount: row.word_count ?? 0,
+    charCount: row.char_count ?? 0,
   };
 }
 
@@ -39,6 +50,7 @@ function toChapter(row: ChapterRow): Chapter {
     content: row.content,
     contentHash: row.content_hash,
     createTime: row.create_time,
+    version: row.version,
   };
 }
 
@@ -51,25 +63,26 @@ async function getOwnedChapterRow(
   const row = await env.DB.prepare(`select * from t_chapter where id = ?`)
     .bind(chapterId)
     .first<ChapterRow>();
-  if (!row) throw new Error("章节不存在");
+  if (!row) throw new ApiError(404, "章节不存在");
 
   const book = await getOwnedBook(env, userId, row.book_id);
-  if (!book) throw new Error("无权操作");
+  if (!book) throw new ApiError(403, "无权操作");
 
   return row;
 }
 
-/** List chapters of a book the user owns (no content). */
+/** List chapters of a book the user owns (metadata only, no content). */
 export async function listChapters(
   env: Env,
   userId: number,
   bookId: number
 ): Promise<ChapterSummary[]> {
   const book = await getOwnedBook(env, userId, bookId);
-  if (!book) throw new Error("无权操作");
+  if (!book) throw new ApiError(403, "无权操作");
 
   const { results } = await env.DB.prepare(
-    `select * from t_chapter where book_id = ? order by sort_order asc, id asc`
+    `select id, book_id, title, sort_order, update_time, word_count, char_count
+     from t_chapter where book_id = ? order by sort_order asc, id asc`
   )
     .bind(bookId)
     .all<ChapterRow>();
@@ -94,23 +107,27 @@ export async function createChapter(
   title?: string
 ): Promise<Chapter> {
   const book = await getOwnedBook(env, userId, bookId);
-  if (!book) throw new Error("无权操作");
+  if (!book) throw new ApiError(403, "无权操作");
 
   const row = await env.DB.prepare(
-    `insert into t_chapter (book_id, title, sort_order)
-     values (?, ?, (select coalesce(max(sort_order), 0) + 1 from t_chapter where book_id = ?))
+    `insert into t_chapter (book_id, title, sort_order, word_count, char_count)
+     values (?, ?, (select coalesce(max(sort_order), 0) + 1 from t_chapter where book_id = ?), 0, 0)
      returning *`
   )
     .bind(bookId, title?.trim() || "未命名章节", bookId)
     .first<ChapterRow>();
 
-  if (!row) throw new Error("创建章节失败");
+  if (!row) throw new ApiError(500, "创建章节失败");
   return toChapter(row);
 }
 
 /**
- * Save a chapter. If the provided hash matches the stored content_hash, the
- * write is skipped (idempotent). Verifies ownership first.
+ * Save a chapter with optimistic concurrency control: the UPDATE itself is
+ * conditioned on the version the client loaded (`WHERE version = ?`), so two
+ * concurrent saves are serialized atomically — the loser matches zero rows and
+ * gets 409. Without baseVersion we fall back to the legacy update_time check.
+ * The content hash is computed server-side; stats are denormalized into the
+ * row.
  */
 export async function saveChapter(
   env: Env,
@@ -120,26 +137,55 @@ export async function saveChapter(
 ): Promise<Chapter> {
   const row = await getOwnedChapterRow(env, userId, chapterId);
 
-  if (input.hash && row.content_hash && input.hash === row.content_hash) {
-    return toChapter(row);
-  }
+  const stats = getContentStats(input.content);
+  const contentHash = await sha256Hex(input.content);
+
+  const useVersion =
+    typeof input.baseVersion === "number" && Number.isSafeInteger(input.baseVersion);
+  const versionGuard = useVersion ? " and version = ?" : "";
+  const args: unknown[] = [
+    input.title.trim() || "未命名章节",
+    input.content,
+    contentHash,
+    stats.wordCount,
+    stats.charCount,
+    chapterId,
+  ];
+  if (useVersion) args.push(input.baseVersion);
 
   const updated = await env.DB.prepare(
     `update t_chapter
-     set title = ?, content = ?, content_hash = ?, update_time = CURRENT_TIMESTAMP
-     where id = ? returning *`
+     set title = ?, content = ?, content_hash = ?, word_count = ?, char_count = ?,
+         version = version + 1, update_time = CURRENT_TIMESTAMP
+     where id = ?${versionGuard} returning *`
   )
-    .bind(input.title, input.content, input.hash ?? null, chapterId)
+    .bind(...args)
     .first<ChapterRow>();
 
-  if (!updated) throw new Error("保存章节失败");
+  if (!updated) {
+    if (useVersion) {
+      // Zero rows matched: another window saved in between -> conflict.
+      throw new ApiError(409, "章节已在其他窗口被修改，继续编辑将覆盖对方内容");
+    }
+    // Legacy path: pre-check update_time (best effort, second precision).
+    if (
+      input.baseUpdateTime !== undefined &&
+      row.update_time !== input.baseUpdateTime
+    ) {
+      throw new ApiError(409, "章节已在其他窗口被修改，继续编辑将覆盖对方内容");
+    }
+    throw new ApiError(500, "保存章节失败");
+  }
   return toChapter(updated);
 }
 
 /**
  * Reorder the chapters of a book to match the given id sequence. Verifies the
- * user owns the book and that every id belongs to it, then writes each
- * chapter's sort_order to its index. Returns the reordered list.
+ * user owns the book, that the sequence covers exactly the book's chapters
+ * (no duplicates, no omissions), then writes each chapter's sort_order to its
+ * index. D1 batches are limited to 100 statements, so large books are written
+ * in chunks (each chunk is its own transaction; a crash mid-way leaves a
+ * partially reordered list, which the next successful reorder heals).
  */
 export async function reorderChapters(
   env: Env,
@@ -148,7 +194,7 @@ export async function reorderChapters(
   ids: number[]
 ): Promise<ChapterSummary[]> {
   const book = await getOwnedBook(env, userId, bookId);
-  if (!book) throw new Error("无权操作");
+  if (!book) throw new ApiError(403, "无权操作");
 
   const { results } = await env.DB.prepare(
     `select id from t_chapter where book_id = ?`
@@ -157,8 +203,11 @@ export async function reorderChapters(
     .all<{ id: number }>();
   const owned = new Set(results.map((r) => r.id));
 
+  if (new Set(ids).size !== ids.length || ids.length !== owned.size) {
+    throw new ApiError(400, "排序列表不合法");
+  }
   for (const id of ids) {
-    if (!owned.has(id)) throw new Error("章节不属于该书");
+    if (!owned.has(id)) throw new ApiError(400, "章节不属于该书");
   }
 
   const statements = ids.map((id, index) =>
@@ -166,7 +215,10 @@ export async function reorderChapters(
       `update t_chapter set sort_order = ? where id = ? and book_id = ?`
     ).bind(index, id, bookId)
   );
-  if (statements.length) await env.DB.batch(statements);
+  const BATCH_LIMIT = 100; // D1 hard cap per batch call
+  for (let i = 0; i < statements.length; i += BATCH_LIMIT) {
+    await env.DB.batch(statements.slice(i, i + BATCH_LIMIT));
+  }
 
   return listChapters(env, userId, bookId);
 }

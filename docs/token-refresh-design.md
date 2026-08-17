@@ -469,3 +469,14 @@ function scheduleProactiveRefresh() {
 | 401 补救重试次数 | 1 次 | `front-end/src/api/http.ts` |
 
 > 以上时长可按产品需要调整；AT 越短越安全但刷新越频繁，15 分钟是常见折衷。
+
+---
+
+## 13. 实现偏差说明（2026-08 修订）
+
+本文档 §8/§10 描述的"旧 RT 重放一律 `revokeAllForUser`"在实际实现中做了修正，以兼容多标签页/多设备并发刷新：
+
+- **并发刷新不再误伤**：两个标签页同时用同一个 RT 刷新时，只有一个会轮换成功；失败方若发现该 jti 的会话已存在但被轮换（`findSession` 命中 `revoked=1`），仅返回 401 而不吊销全账号，客户端会用本地存储中最新的 RT 自动重试（前端另有 `navigator.locks` 跨标签页单飞降低该概率）。
+- **真重放仍全吊销**：签名有效但 jti 在会话表中完全不存在（从未创建或已被清理）时，仍触发 `revokeAllForUser`。
+- **客户端错误区分**：`http.ts` 会区分"RT 被拒（强制登出）"与"网络错误（保留会话重试）"，HTTP 状态码与业务 code 对齐后 401 路径依赖 envelope 而非 `res.ok`。
+- 密码存储同步加固为 PBKDF2-SHA256（见 `back-end/src/utils/password.ts`），存量明文在首次登录时自动升级。

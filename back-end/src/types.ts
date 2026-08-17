@@ -23,6 +23,11 @@ export interface ChapterRow {
   sort_order: number;
   create_time: string;
   update_time: string;
+  /** Denormalized stats (written on save; 0 for pre-migration rows). */
+  word_count: number;
+  char_count: number;
+  /** Optimistic-lock counter, bumped on every save. */
+  version: number;
 }
 
 /** Book list item / detail returned to the client (camelCase). */
@@ -55,6 +60,8 @@ export interface Chapter extends ChapterSummary {
   content: string;
   contentHash: string | null;
   createTime: string;
+  /** Optimistic-lock counter; pass back as baseVersion when saving. */
+  version: number;
 }
 
 /** Result of token verification. */

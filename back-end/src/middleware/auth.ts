@@ -17,8 +17,12 @@ export async function checkAuth(ctx: Ctx): Promise<AuthResult> {
     return { success: false, message: "未登录" };
   }
 
-  const token = header.replace("Bearer ", "");
-  const result = await verifyAccess(token, ctx.env);
+  // Case-insensitive scheme, exactly one space, no leading/trailing junk.
+  const match = header.match(/^Bearer\s+(\S+)$/i);
+  if (!match) {
+    return { success: false, message: "未登录" };
+  }
+  const result = await verifyAccess(match[1], ctx.env);
   if (!result.success || result.userId === undefined) {
     return { success: false, message: "请重新登录" };
   }

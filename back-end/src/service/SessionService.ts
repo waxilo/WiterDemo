@@ -29,16 +29,17 @@ export async function createSession(
     .run();
 }
 
-/** Look up an active (not revoked, not expired) session by jti. */
+/** Look up an active (not revoked, not expired) session by jti + owner. */
 export async function getActiveSession(
   env: Env,
+  userId: number,
   jti: string
 ): Promise<SessionRow | null> {
   const row = await env.DB.prepare(
     `select id, user_id, jti, revoked, token_expire_ms
-     from t_login_log where jti = ?`
+     from t_login_log where jti = ? and user_id = ?`
   )
-    .bind(jti)
+    .bind(jti, userId)
     .first<SessionRow>();
 
   if (!row) return null;
@@ -48,8 +49,33 @@ export async function getActiveSession(
 }
 
 /**
- * Rotate a session: revoke the old jti (recording which jti superseded it, for
- * replay detection) and insert the new session, in one batch.
+ * Find any session row (active or revoked) by jti + owner. Used by /refresh
+ * to tell apart a genuine replay (no row at all) from a concurrent rotation
+ * that just revoked this jti (row exists with revoked=1) — the latter must
+ * NOT trigger a blanket revoke-all, or two tabs refreshing at the same time
+ * would log every device out.
+ */
+export async function findSession(
+  env: Env,
+  userId: number,
+  jti: string
+): Promise<SessionRow | null> {
+  return env.DB.prepare(
+    `select id, user_id, jti, revoked, token_expire_ms
+     from t_login_log where jti = ? and user_id = ?`
+  )
+    .bind(jti, userId)
+    .first<SessionRow>();
+}
+
+/**
+ * Rotate a session: atomically revoke the old jti (recording which jti
+ * superseded it) and insert the new session. The conditional UPDATE doubles
+ * as replay detection: if the old session was already revoked/rotated (e.g. a
+ * concurrent refresh won the race), the rotation fails and the caller decides
+ * how to respond (see /refresh — concurrent rotations are not punished, only
+ * genuinely unknown jtis trigger a blanket revoke). Returns false when the
+ * old session was not active.
  */
 export async function rotateSession(
   env: Env,
@@ -58,17 +84,40 @@ export async function rotateSession(
   newJti: string,
   newToken: string,
   newExpMs: number
-): Promise<void> {
+): Promise<boolean> {
   const hash = await sha256Hex(newToken);
-  await env.DB.batch([
-    env.DB.prepare(
-      `update t_login_log set revoked = 1, rotated_to = ?, last_used = CURRENT_TIMESTAMP where jti = ?`
-    ).bind(newJti, oldJti),
-    env.DB.prepare(
-      `insert into t_login_log (user_id, token, token_expire_ms, jti, revoked, last_used)
-       values (?, ?, ?, ?, 0, CURRENT_TIMESTAMP)`
-    ).bind(userId, hash, newExpMs, newJti),
-  ]);
+
+  // Conditional revoke first: a concurrent /refresh with the same old RT can
+  // no longer both succeed — only the first one matches `revoked = 0`.
+  const revoke = await env.DB.prepare(
+    `update t_login_log set revoked = 1, rotated_to = ?, last_used = CURRENT_TIMESTAMP
+     where jti = ? and user_id = ? and revoked = 0`
+  )
+    .bind(newJti, oldJti, userId)
+    .run();
+
+  if (revoke.meta.changes === 0) {
+    // The old session was already revoked/rotated by a concurrent refresh.
+    // Not punished here: /refresh handles the replay-vs-concurrency decision
+    // via findSession (punishing would log out every device on a race).
+    return false;
+  }
+
+  await env.DB.prepare(
+    `insert into t_login_log (user_id, token, token_expire_ms, jti, revoked, last_used)
+     values (?, ?, ?, ?, 0, CURRENT_TIMESTAMP)`
+  )
+    .bind(userId, hash, newExpMs, newJti)
+    .run();
+
+  // Opportunistic cleanup of expired/revoked rows (keeps the table bounded).
+  await env.DB.prepare(
+    `delete from t_login_log where revoked = 1 and token_expire_ms < ?`
+  )
+    .bind(Date.now())
+    .run();
+
+  return true;
 }
 
 /** Revoke a single session (logout). */

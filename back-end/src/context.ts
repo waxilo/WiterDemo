@@ -3,6 +3,8 @@
 // every function. Lives only in the route/controller layer; services receive
 // plain arguments instead.
 
+import { ApiError } from "./errors";
+
 export interface Ctx {
   request: Request;
   env: Env;
@@ -30,7 +32,17 @@ export function createContext(request: Request, env: Env): Ctx {
     userId: 0,
     json<T>(): Promise<T> {
       if (!bodyPromise) {
-        bodyPromise = request.json();
+        bodyPromise = request
+          .json()
+          .then((value) => {
+            // `null` parses fine as JSON but is never a valid request body;
+            // without this, controllers would 500 on `body.title` access.
+            if (value === null || value === undefined) {
+              throw new ApiError(400, "请求体格式错误");
+            }
+            return value;
+          })
+          .catch(() => Promise.reject(new ApiError(400, "请求体格式错误")));
       }
       return bodyPromise as Promise<T>;
     },
