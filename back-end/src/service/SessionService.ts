@@ -9,7 +9,10 @@ interface SessionRow {
   user_id: number;
   jti: string;
   revoked: number;
+  /** Refresh token lifetime in ms (a duration, relative to `login_time`). */
   token_expire_ms: number;
+  /** Derived in SQL: `login_time + token_expire_ms`, as ms since epoch. */
+  expire_at_ms: number;
 }
 
 /** Register a new refresh-token session (stores only the token hash). */
@@ -18,25 +21,30 @@ export async function createSession(
   userId: number,
   jti: string,
   token: string,
-  expMs: number
+  ttlMs: number
 ): Promise<void> {
   const hash = await sha256Hex(token);
   await env.DB.prepare(
     `insert into t_login_log (user_id, token, token_expire_ms, jti, revoked, last_used)
      values (?, ?, ?, ?, 0, CURRENT_TIMESTAMP)`
   )
-    .bind(userId, hash, expMs, jti)
+    .bind(userId, hash, ttlMs, jti)
     .run();
 }
 
-/** Look up an active (not revoked, not expired) session by jti + owner. */
+/**
+ * Look up an active (not revoked, not expired) session by jti + owner.
+ * `token_expire_ms` is a lifetime, so the absolute expiry is computed from
+ * `login_time` (stored by SQLite as UTC) inside SQL.
+ */
 export async function getActiveSession(
   env: Env,
   userId: number,
   jti: string
 ): Promise<SessionRow | null> {
   const row = await env.DB.prepare(
-    `select id, user_id, jti, revoked, token_expire_ms
+    `select id, user_id, jti, revoked, token_expire_ms,
+            strftime('%s', login_time) * 1000 + token_expire_ms as expire_at_ms
      from t_login_log where jti = ? and user_id = ?`
   )
     .bind(jti, userId)
@@ -44,7 +52,7 @@ export async function getActiveSession(
 
   if (!row) return null;
   if (row.revoked === 1) return null;
-  if (row.token_expire_ms <= Date.now()) return null;
+  if (row.expire_at_ms <= Date.now()) return null;
   return row;
 }
 
@@ -83,7 +91,7 @@ export async function rotateSession(
   oldJti: string,
   newJti: string,
   newToken: string,
-  newExpMs: number
+  newTtlMs: number
 ): Promise<boolean> {
   const hash = await sha256Hex(newToken);
 
@@ -107,12 +115,14 @@ export async function rotateSession(
     `insert into t_login_log (user_id, token, token_expire_ms, jti, revoked, last_used)
      values (?, ?, ?, ?, 0, CURRENT_TIMESTAMP)`
   )
-    .bind(userId, hash, newExpMs, newJti)
+    .bind(userId, hash, newTtlMs, newJti)
     .run();
 
   // Opportunistic cleanup of expired/revoked rows (keeps the table bounded).
+  // token_expire_ms is a DURATION, so absolute expiry is derived in SQL.
   await env.DB.prepare(
-    `delete from t_login_log where revoked = 1 and token_expire_ms < ?`
+    `delete from t_login_log
+     where revoked = 1 and strftime('%s', login_time) * 1000 + token_expire_ms < ?`
   )
     .bind(Date.now())
     .run();

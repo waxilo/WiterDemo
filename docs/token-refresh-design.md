@@ -130,7 +130,7 @@ CREATE INDEX IF NOT EXISTS idx_login_log_user ON t_login_log (user_id);
 | --- | --- |
 | `token` | 存 RT 的哈希（`jti` 已单列，可只存哈希做双重校验，或直接用 `jti` 唯一约束） |
 | `jti` | 刷新令牌唯一标识；`/refresh` 时据此定位会话 |
-| `token_expire_ms` | RT 过期时间（毫秒时间戳） |
+| `token_expire_ms` | RT 有效时长（毫秒）；绝对过期时间 = `login_time + token_expire_ms`，查询时计算 |
 | `revoked` | 是否已吊销（登出 / 被轮换 / 重放触发） |
 | `rotated_to` | 轮换后新令牌的 `jti`；旧 RT 被再次使用即判定重放 |
 | `last_used` | 最近一次刷新时间，便于审计 |

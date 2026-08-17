@@ -146,18 +146,21 @@ export function createAccessToken(userId: number, env: Env): Promise<string> {
   );
 }
 
-/** Issue a long-lived refresh token; returns the token plus its jti/expiry. */
+/**
+ * Issue a long-lived refresh token; returns the token, its jti and its lifetime
+ * in milliseconds (a duration, not an absolute timestamp).
+ */
 export async function createRefreshToken(
   userId: number,
   env: Env
-): Promise<{ token: string; jti: string; expMs: number }> {
+): Promise<{ token: string; jti: string; ttlMs: number }> {
   const jti = crypto.randomUUID();
   const token = await signJwt(
     { uid: userId, typ: "refresh" satisfies TokenType, jti },
     REFRESH_TTL,
     env.REFRESH_SECRET
   );
-  return { token, jti, expMs: (Math.floor(Date.now() / 1000) + REFRESH_TTL) * 1000 };
+  return { token, jti, ttlMs: REFRESH_TTL * 1000 };
 }
 
 /** Verify an access token; returns the embedded user id on success. */

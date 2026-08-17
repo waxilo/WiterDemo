@@ -2,7 +2,7 @@
 -- Reuses t_login_log as the session store.
 --   token           : SHA-256 hash of the refresh token (never the plaintext)
 --   jti             : refresh token unique id, used to locate the session
---   token_expire_ms : refresh token expiry (ms since epoch)
+--   token_expire_ms : refresh token lifetime in ms (see 0004: relative to login_time)
 --   revoked         : 1 once the session is logged out / rotated / replayed
 --   rotated_to      : jti of the session that superseded this one (replay detection)
 --   last_used       : last time this session was refreshed

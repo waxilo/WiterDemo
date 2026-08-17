@@ -113,8 +113,8 @@ export async function issueTokens(
   env: Env
 ): Promise<AuthTokens> {
   const accessToken = await createAccessToken(userId, env);
-  const { token, jti, expMs } = await createRefreshToken(userId, env);
-  await createSession(env, userId, jti, token, expMs);
+  const { token, jti, ttlMs } = await createRefreshToken(userId, env);
+  await createSession(env, userId, jti, token, ttlMs);
   return { accessToken, refreshToken: token, expiresIn: ACCESS_TTL };
 }
 

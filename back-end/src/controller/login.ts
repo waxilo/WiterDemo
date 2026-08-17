@@ -79,7 +79,7 @@ export async function refresh(ctx: Ctx): Promise<Response> {
   const {
     token: newRefresh,
     jti: newJti,
-    expMs,
+    ttlMs,
   } = await createRefreshToken(check.uid, ctx.env);
   const rotated = await sessionService.rotateSession(
     ctx.env,
@@ -87,7 +87,7 @@ export async function refresh(ctx: Ctx): Promise<Response> {
     check.jti,
     newJti,
     newRefresh,
-    expMs
+    ttlMs
   );
   if (!rotated) {
     // A concurrent refresh rotated this session first (edge of the race);
