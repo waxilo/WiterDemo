@@ -2,15 +2,9 @@ import { ref } from "vue";
 import {
   login as loginApi,
   register as registerApi,
-  logout as logoutApi,
 } from "../api/auth";
-import {
-  sessionRef,
-  setSession,
-  clearSession,
-  getRefreshToken,
-} from "../api/tokenStore";
-import { cancelProactiveRefresh, scheduleProactiveRefresh } from "../api/http";
+import { setSession } from "../api/tokenStore";
+import { scheduleProactiveRefresh } from "../api/http";
 
 export type AuthMode = "login" | "register";
 
@@ -26,7 +20,6 @@ export function useAuth() {
   const confirmPassword = ref("");
   const loading = ref(false);
   const error = ref("");
-  const loggedIn = sessionRef();
 
   /** Switch between login and register, clearing transient state. */
   function switchMode(next: AuthMode) {
@@ -89,21 +82,6 @@ export function useAuth() {
     return mode.value === "login" ? login() : register();
   }
 
-  async function logout() {
-    const rt = getRefreshToken();
-    // Best-effort server-side revocation; clear locally regardless.
-    if (rt) {
-      try {
-        await logoutApi(rt);
-      } catch {
-        // ignore network/revocation errors
-      }
-    }
-    cancelProactiveRefresh();
-    clearSession();
-    error.value = "";
-  }
-
   return {
     mode,
     username,
@@ -111,11 +89,9 @@ export function useAuth() {
     confirmPassword,
     loading,
     error,
-    loggedIn,
     switchMode,
     submit,
     login,
     register,
-    logout,
   };
 }

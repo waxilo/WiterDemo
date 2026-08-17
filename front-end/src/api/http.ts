@@ -17,6 +17,7 @@ import type { AuthTokens } from "../types/auth";
 import {
   getAccessToken,
   getRefreshToken,
+  getStoredRefreshToken,
   getAccessExp,
   setSession,
   clearSession,
@@ -54,32 +55,67 @@ export function cancelProactiveRefresh(): void {
   }
 }
 
-/** Perform the actual /refresh call. Returns true on success. */
-async function doRefresh(): Promise<boolean> {
-  const refreshToken = getRefreshToken();
-  if (!refreshToken) return false;
-
+/** Perform the actual /refresh call with a specific token. Returns true on success. */
+async function refreshWith(refreshToken: string, isRetry: boolean): Promise<boolean> {
   try {
-    const res = await fetch(resolveUrl("/refresh"), {
+    const res = await fetchWithTimeout(resolveUrl("/refresh"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ refreshToken }),
     });
-    if (!res.ok) return false;
     const json: ApiResponse<AuthTokens> = await res.json();
     if (json.code !== 200 || !json.data) {
-      // Refresh token rejected/revoked -> force logout.
-      cancelProactiveRefresh();
-      clearSession();
+      if (json.code === 401 && !isRetry) {
+        // The token we used was rejected. Another tab may have rotated it
+        // while our request was in flight and already written a newer RT to
+        // localStorage — read the SHARED storage (not the in-memory ref,
+        // which is stale until the storage event arrives) and retry once.
+        const latest = getStoredRefreshToken();
+        if (latest && latest !== refreshToken) {
+          return refreshWith(latest, true);
+        }
+      }
+      // A genuine 401 (token rejected/revoked) ends the session; anything
+      // else (5xx, 429) is a server hiccup and must NOT kick the user out —
+      // keep the session and let the next attempt retry.
+      if (json.code === 401) {
+        cancelProactiveRefresh();
+        clearSession();
+      }
       return false;
     }
     setSession(json.data);
     scheduleProactiveRefresh();
     return true;
   } catch {
-    // Network error: don't force logout, let the next attempt retry.
+    // Network error / timeout: keep the session and let the next attempt retry
+    // (a bad network must not kick the user to the login page).
     return false;
   }
+}
+
+/** Perform the actual /refresh call. Returns true on success. */
+function doRefresh(): Promise<boolean> {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return Promise.resolve(false);
+  return refreshWith(refreshToken, false);
+}
+
+/**
+ * Single-flight refresh, ALSO across tabs: two tabs refreshing at the same
+ * time used to race the server-side rotation (one loses and gets a 401).
+ * `navigator.locks` (Web Locks API) serializes the refresh across same-origin
+ * tabs where available; the in-memory promise is the fallback and covers
+ * webviews without Web Locks support.
+ */
+async function runRefreshOnce(): Promise<boolean> {
+  const locks = navigator.locks;
+  if (locks && typeof locks.request === "function") {
+    return locks.request("writer-token-refresh", { mode: "exclusive" }, () =>
+      doRefresh()
+    );
+  }
+  return doRefresh();
 }
 
 /**
@@ -95,7 +131,7 @@ export function ensureFreshToken(force = false): Promise<boolean> {
     return Promise.resolve(true);
   }
   if (!refreshPromise) {
-    refreshPromise = doRefresh().finally(() => {
+    refreshPromise = runRefreshOnce().finally(() => {
       refreshPromise = null;
     });
   }
@@ -123,6 +159,28 @@ export function scheduleProactiveRefresh(): void {
 }
 
 // --- request -----------------------------------------------------------------
+
+const REQUEST_TIMEOUT_MS = 20_000;
+
+/**
+ * fetch with a hard timeout (AbortController, works in browsers and webviews
+ * that predate AbortSignal.timeout). Throws a friendly error on timeout.
+ */
+async function fetchWithTimeout(
+  input: string,
+  init: RequestInit
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error("请求超时，请检查网络");
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function buildInit(
   method: HttpMethod,
@@ -160,48 +218,84 @@ export async function request<T>(
     await ensureFreshToken(); // pre-flight: refresh if expired/near-expiry
   }
 
-  let res = await fetch(url, buildInit(method, body, headers, !skipAuthRefresh));
+  let res = await fetchWithTimeout(
+    url,
+    buildInit(method, body, headers, !skipAuthRefresh)
+  );
   let json: ApiResponse<T> = await parse(res);
 
   // Recovery: AT rejected despite pre-flight (e.g. clock skew) — force refresh.
   if (json.code === 401 && !skipAuthRefresh) {
     const ok = await ensureFreshToken(true);
     if (ok) {
-      res = await fetch(url, buildInit(method, body, headers, true));
+      res = await fetchWithTimeout(url, buildInit(method, body, headers, true));
       json = await parse(res);
     } else if (getRefreshToken()) {
       // Transient /refresh failure (network): keep session, don't kick to login.
-      throw new Error(json.message || "网络异常，请稍后重试");
+      throw clientError(401, json.message || "网络异常，请稍后重试");
     } else {
       // RT already cleared by doRefresh (rejected/revoked).
-      throw new Error(json.message || "登录已失效，请重新登录");
+      throw clientError(401, json.message || "登录已失效，请重新登录");
     }
   }
 
   if (json.code === 401) {
     cancelProactiveRefresh();
     clearSession();
-    throw new Error(json.message || "登录已失效，请重新登录");
+    throw clientError(json.code, json.message || "登录已失效，请重新登录");
   }
   if (json.code !== 200) {
-    throw new Error(json.message || `Unexpected code: ${json.code}`);
+    throw clientError(json.code, json.message || `Unexpected code: ${json.code}`);
   }
   return json.data;
 }
 
+/**
+ * Error thrown for business-code failures. Carries the backend `code` (e.g.
+ * 409) so callers can branch on the failure kind, not just the message.
+ */
+export class ApiClientError extends Error {
+  constructor(
+    public readonly code: number,
+    message: string
+  ) {
+    super(message);
+    this.name = "ApiClientError";
+  }
+}
+
+function clientError(code: number, message: string): ApiClientError {
+  return new ApiClientError(code, message);
+}
+
+/**
+ * Read the envelope from a response. The body is parsed FIRST so a real
+ * HTTP 401/500 still surfaces its `{ code, message }` (the 401-recovery logic
+ * above keys off the envelope code, not the HTTP status). Only when the body
+ * is not JSON do we fall back to a generic HTTP error.
+ */
 async function parse<T>(res: Response): Promise<ApiResponse<T>> {
-  if (!res.ok) {
+  try {
+    return (await res.json()) as ApiResponse<T>;
+  } catch {
     throw new Error(`HTTP ${res.status} ${res.statusText}`);
   }
-  return res.json();
 }
 
-/** Convenience GET helper. */
-export function getJson<T>(path: string): Promise<T> {
-  return request<T>(path, { method: "GET" });
-}
-
-/** Convenience POST helper. */
-export function postJson<T>(path: string, body?: unknown): Promise<T> {
-  return request<T>(path, { method: "POST", body });
+/**
+ * Synchronous, best-effort request for page-unload saves (Tauri window close /
+ * tab close), where async fetch is not guaranteed to complete. Errors are
+ * swallowed — this is a last-resort flush, not a primary save path.
+ */
+export function syncRequest(method: string, path: string, body: unknown): void {
+  try {
+    const xhr = new XMLHttpRequest();
+    xhr.open(method, resolveUrl(path), false);
+    xhr.setRequestHeader("Content-Type", "application/json");
+    const token = getAccessToken();
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    xhr.send(JSON.stringify(body));
+  } catch {
+    // Best effort only.
+  }
 }

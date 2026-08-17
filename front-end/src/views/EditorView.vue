@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, computed, ref, nextTick } from "vue";
+import { onMounted, onUnmounted, computed, ref, nextTick, watch } from "vue";
 import type { useBooks } from "../composables/useBooks";
 import type { useChapters } from "../composables/useChapters";
 import ChapterList from "../components/ChapterList.vue";
 import ChapterEditor from "../components/ChapterEditor.vue";
 import { useConfirm } from "../composables/useConfirm";
+import { showToast } from "../composables/useToast";
 import { formatCount, getTextStats } from "../utils/textStats";
 
 const confirm = useConfirm();
@@ -28,6 +29,7 @@ const {
   loading,
   saving,
   dirty,
+  saveError,
   select,
   create,
   remove,
@@ -41,12 +43,40 @@ const {
 const saveStatus = computed(() => {
   if (!current.value) return null;
   if (saving.value) return { text: "保存中", cls: "saving" };
+  if (saveError.value) return { text: "保存失败", cls: "error" };
   if (dirty.value) return { text: "未保存", cls: "dirty" };
   return { text: "已保存", cls: "saved" };
 });
 
-const currentStats = computed(() =>
-  getTextStats(current.value?.content ?? "")
+// Surface save failures (e.g. a 409 conflict from another window) as a toast.
+// Only toast when the message CHANGES — autosave retries after a failure and
+// would otherwise re-toast the same message every few seconds.
+watch(saveError, (message, previous) => {
+  if (message && message !== previous) showToast(message, "error");
+});
+
+// --- word/char stats, debounced so typing never pays full-text cost ---------
+const currentStats = ref(getTextStats(current.value?.content ?? ""));
+let statsTimer: ReturnType<typeof setTimeout> | null = null;
+
+watch(
+  () => current.value?.content,
+  () => {
+    if (statsTimer !== null) clearTimeout(statsTimer);
+    statsTimer = setTimeout(() => {
+      currentStats.value = getTextStats(current.value?.content ?? "");
+    }, 120);
+  }
+);
+
+watch(
+  () => current.value?.id,
+  () => {
+    // Chapter switch recomputes immediately (no need to wait for debounce).
+    if (statsTimer !== null) clearTimeout(statsTimer);
+    currentStats.value = getTextStats(current.value?.content ?? "");
+  },
+  { immediate: true }
 );
 
 const currentChapterNumber = computed(() => {
@@ -116,7 +146,11 @@ async function saveTitle() {
   editingTitle.value = false;
   const next = titleDraft.value.trim();
   if (bookId.value === null || !next || next === bookTitle.value) return;
-  await props.books.rename(bookId.value, next);
+  try {
+    await props.books.rename(bookId.value, next);
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "重命名失败", "error");
+  }
 }
 
 function cancelEditTitle() {
@@ -158,16 +192,26 @@ function onEsc(e: KeyboardEvent) {
 }
 
 async function onBack() {
-  await flush();
+  try {
+    await flush();
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "保存失败", "error");
+  }
   props.books.backToShelf();
 }
 
 function onSelect(id: number) {
-  void select(id);
+  select(id).catch((error: unknown) => {
+    showToast(error instanceof Error ? error.message : "加载失败", "error");
+  });
 }
 
 async function onCreate() {
-  if (bookId.value !== null) await create(bookId.value);
+  try {
+    if (bookId.value !== null) await create(bookId.value);
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "创建失败", "error");
+  }
 }
 
 async function onRemove(id: number) {
@@ -177,19 +221,37 @@ async function onRemove(id: number) {
     confirmText: "删除",
     cancelText: "取消",
   });
-  if (ok) await remove(id);
+  if (ok) {
+    try {
+      await remove(id);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "删除失败", "error");
+    }
+  }
 }
 
 async function onRename(id: number, title: string) {
-  await rename(id, title);
+  try {
+    await rename(id, title);
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "重命名失败", "error");
+  }
 }
 
 async function onDuplicate(id: number) {
-  await duplicate(id);
+  try {
+    await duplicate(id);
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "复制失败", "error");
+  }
 }
 
 function onReorder(ids: number[]) {
-  if (bookId.value !== null) void reorder(bookId.value, ids);
+  if (bookId.value !== null) {
+    reorder(bookId.value, ids).catch((error: unknown) => {
+      showToast(error instanceof Error ? error.message : "排序失败", "error");
+    });
+  }
 }
 </script>
 
@@ -452,6 +514,11 @@ function onReorder(ids: number[]) {
   color: #a48a56;
 }
 
+.save-meta.error {
+  color: #c45d55;
+  font-weight: 600;
+}
+
 .book-title:hover {
   background: rgba(0, 0, 0, 0.04);
 }
@@ -469,32 +536,6 @@ function onReorder(ids: number[]) {
   outline: none;
   background: #fffdf8;
   min-width: 220px;
-}
-
-.status {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45em;
-  font-size: 0.8rem;
-  color: #888;
-  opacity: 0.85;
-  user-select: none;
-}
-
-.status .dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #8ba57b;
-  transition: background 0.3s ease;
-}
-
-.status.saving .dot {
-  background: #7f95d8;
-}
-
-.status.dirty .dot {
-  background: #cbb06a;
 }
 
 /* ---- user menu ---- */
@@ -706,7 +747,6 @@ function onReorder(ids: number[]) {
   }
 
   .back span,
-  .status-text,
   .uname,
   .chevron {
     display: none;

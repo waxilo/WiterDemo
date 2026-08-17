@@ -1,11 +1,12 @@
-import { ref, computed } from "vue";
+import { ref, computed, watch } from "vue";
 import SparkMD5 from "spark-md5";
 import * as chapterApi from "../api/chapter";
+import { syncRequest, ApiClientError } from "../api/http";
 import type { Chapter, ChapterSummary } from "../types/chapter";
 import { AUTOSAVE_IDLE_MS } from "../config";
 import { getTextStats } from "../utils/textStats";
 
-/** Hash rule shared with the save flow: md5 of the JSON {title, content}. */
+/** Client-side dirty marker: md5 of the JSON {title, content}. */
 function hashOf(title: string, content: string): string {
   return SparkMD5.hash(JSON.stringify({ title, content }));
 }
@@ -24,16 +25,20 @@ function toSummary(chapter: Chapter): ChapterSummary {
 /**
  * Chapter state for the currently open book: the chapter list, the selected
  * chapter (with editable title/content), and save logic (manual Ctrl+S,
- * idle autosave, and flush) with MD5 dedup.
+ * idle autosave, and flush) with MD5 dedup. A save that lands while another
+ * save is in flight is queued and re-run afterwards instead of being dropped.
  */
 export function useChapters() {
   const list = ref<ChapterSummary[]>([]);
   const current = ref<Chapter | null>(null);
   const loading = ref(false);
   const saving = ref(false);
+  /** Message of the last failed save (cleared on the next successful save). */
+  const saveError = ref<string | null>(null);
   const savedHash = ref<string | null>(null);
 
   let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  let saveQueued = false;
 
   function currentHash(): string {
     if (!current.value) return "";
@@ -44,6 +49,22 @@ export function useChapters() {
     () => current.value !== null && currentHash() !== savedHash.value
   );
 
+  /**
+   * The sidebar and the editor show the SAME chapter title. Whenever the
+   * title of the open chapter changes (typing in the editor's title input),
+   * mirror it into the list item so the sidebar updates live, and let the
+   * autosave flow persist it (title is part of the dirty hash).
+   */
+  watch(
+    () => current.value?.title,
+    (title, previous) => {
+      if (!current.value || title === undefined || title === previous) return;
+      const item = list.value.find((c) => c.id === current.value?.id);
+      if (item && item.title !== title) item.title = title;
+      scheduleAutoSave();
+    }
+  );
+
   function clearAutoSaveTimer(): void {
     if (autoSaveTimer !== null) {
       clearTimeout(autoSaveTimer);
@@ -51,12 +72,14 @@ export function useChapters() {
     }
   }
 
-  /** Reset all chapter state synchronously (e.g. when opening a book). */
+  /** Reset all chapter state synchronously (e.g. logout / opening a book). */
   function reset(): void {
     clearAutoSaveTimer();
+    saveQueued = false;
     list.value = [];
     current.value = null;
     savedHash.value = null;
+    saveError.value = null;
   }
 
   async function loadList(bookId: number): Promise<void> {
@@ -95,18 +118,27 @@ export function useChapters() {
 
     const hash = currentHash();
     if (hash === savedHash.value) return; // no change
-    if (saving.value) return; // avoid re-entrancy
+    if (saving.value) {
+      // A save is already in flight: remember to re-save when it finishes
+      // instead of silently dropping these edits.
+      saveQueued = true;
+      return;
+    }
 
     saving.value = true;
     try {
       const saved = await chapterApi.saveChapter(chapter.id, {
         title: chapter.title,
         content: chapter.content,
-        hash,
+        baseVersion: chapter.version,
       });
       savedHash.value = hash;
       chapter.updateTime = saved.updateTime;
+      chapter.version = saved.version;
       chapter.contentHash = saved.contentHash;
+      // A successful save clears any previous failure (failure keeps its
+      // message so repeated retries don't re-toast the same error).
+      saveError.value = null;
       // Reflect updated metadata in the list.
       const item = list.value.find((c) => c.id === saved.id);
       if (item) {
@@ -114,8 +146,45 @@ export function useChapters() {
         item.updateTime = saved.updateTime;
         Object.assign(item, getTextStats(saved.content));
       }
+    } catch (error) {
+      saveError.value = error instanceof Error ? error.message : "保存失败";
+      if (error instanceof ApiClientError && error.code === 409) {
+        // Conflict: another window saved this chapter while we were editing.
+        // Align our base version with the server so the NEXT save succeeds
+        // (last-write-wins, i.e. our local edit wins with awareness), and do
+        // NOT auto-retry — the user has been told; a retry would just 409
+        // again and, worse, would block chapter switching via flush().
+        saveQueued = false;
+        await adoptServerVersion(chapter.id).catch(() => undefined);
+      } else {
+        // Transient failure: retry once the idle period passes (no new input
+        // required). A failed save must not leave a stale queued flag.
+        saveQueued = false;
+        scheduleAutoSave();
+      }
+      throw error;
     } finally {
       saving.value = false;
+    }
+
+    // Edits that arrived while we were saving are persisted by a follow-up run.
+    if (saveQueued) {
+      saveQueued = false;
+      void save().catch(() => undefined);
+    }
+  }
+
+  /**
+   * Fetch the server's current version for a chapter and adopt it as our
+   * base, so subsequent saves pass the optimistic-lock check. Local content
+   * is untouched — the next save intentionally overwrites the other window.
+   */
+  async function adoptServerVersion(chapterId: number): Promise<void> {
+    const fresh = await chapterApi.getChapter(chapterId);
+    if (current.value?.id === chapterId) {
+      current.value.version = fresh.version;
+      const item = list.value.find((c) => c.id === chapterId);
+      if (item) item.updateTime = fresh.updateTime;
     }
   }
 
@@ -123,7 +192,7 @@ export function useChapters() {
   function scheduleAutoSave(): void {
     clearAutoSaveTimer();
     autoSaveTimer = setTimeout(() => {
-      void save();
+      void save().catch(() => undefined);
     }, AUTOSAVE_IDLE_MS);
   }
 
@@ -131,6 +200,22 @@ export function useChapters() {
   async function flush(): Promise<void> {
     clearAutoSaveTimer();
     if (dirty.value) await save();
+  }
+
+  /**
+   * Synchronous best-effort flush for page unload (window/app close), where
+   * async requests are not guaranteed to complete.
+   */
+  function flushSync(): void {
+    const chapter = current.value;
+    if (!chapter) return;
+    const hash = currentHash();
+    if (hash === savedHash.value) return;
+    syncRequest("PUT", `/chapters/${chapter.id}`, {
+      title: chapter.title,
+      content: chapter.content,
+      baseVersion: chapter.version,
+    });
   }
 
   async function remove(id: number): Promise<void> {
@@ -165,7 +250,7 @@ export function useChapters() {
     const saved = await chapterApi.saveChapter(id, {
       title: normalizedTitle,
       content: chapter.content,
-      hash: hashOf(normalizedTitle, chapter.content),
+      baseVersion: chapter.version,
     });
     if (item) Object.assign(item, toSummary(saved));
   }
@@ -183,7 +268,7 @@ export function useChapters() {
       const copied = await chapterApi.saveChapter(created.id, {
         title: duplicateTitle,
         content: source.content,
-        hash: hashOf(duplicateTitle, source.content),
+        baseVersion: created.version,
       });
       const sourceIndex = list.value.findIndex((chapter) => chapter.id === id);
       const insertIndex = sourceIndex < 0 ? list.value.length : sourceIndex + 1;
@@ -225,12 +310,15 @@ export function useChapters() {
     loading,
     saving,
     dirty,
+    saveError,
     loadList,
     select,
     create,
     save,
     scheduleAutoSave,
     flush,
+    flushSync,
+    reset,
     remove,
     rename,
     duplicate,

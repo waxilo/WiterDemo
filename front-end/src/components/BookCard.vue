@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import type { Book } from "../types/chapter";
+import type { Book } from "../types/book";
 
 const props = defineProps<{ book: Book }>();
 const emit = defineEmits<{
@@ -47,10 +47,24 @@ const editedLabel = computed(() => {
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 });
+function onCardKeydown(e: KeyboardEvent): void {
+  // Keyboard activation for the card (which is a clickable <article>).
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    emit("open", props.book.id);
+  }
+}
 </script>
 
 <template>
-  <article class="card" @click="emit('open', book.id)">
+  <article
+    class="card"
+    role="button"
+    tabindex="0"
+    :aria-label="`打开《${props.book.title}》`"
+    @click="emit('open', book.id)"
+    @keydown="onCardKeydown"
+  >
     <button class="delete" title="删除作品" @click.stop="emit('remove', book.id)">
       <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
         <path

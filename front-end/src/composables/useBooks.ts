@@ -1,6 +1,6 @@
 import { ref, computed } from "vue";
 import * as bookApi from "../api/book";
-import type { Book } from "../types/chapter";
+import type { Book } from "../types/book";
 
 /**
  * Bookshelf state: the user's books and which one is currently open.

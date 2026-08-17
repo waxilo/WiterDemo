@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount } from "vue";
+import { onMounted, onBeforeUnmount, ref, watch, nextTick } from "vue";
 
 /**
  * 所有弹窗的基础组件：统一遮罩、毛玻璃、居中、开合动画、ESC / 点击遮罩关闭。
- * 未来的 InputDialog / RenameDialog / AlertDialog 等都基于它，
- * 保证整个项目弹窗的圆角、阴影、动画、遮罩完全一致。
+ * 打开时把焦点移入弹窗并做焦点圈定（focus trap），关闭后还原焦点。
  */
 const props = withDefaults(
   defineProps<{
@@ -23,16 +22,65 @@ const props = withDefaults(
 
 const emit = defineEmits<{ (e: "close"): void }>();
 
+const panelRef = ref<HTMLElement | null>(null);
+let previouslyFocused: HTMLElement | null = null;
+
+function focusableElements(panel: HTMLElement): HTMLElement[] {
+  return Array.from(
+    panel.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    )
+  ).filter((el) => !el.hasAttribute("disabled") && el.getAttribute("aria-hidden") !== "true");
+}
+
 function onKeydown(e: KeyboardEvent) {
-  if (e.key === "Escape" && props.visible && props.closeOnEsc) {
+  if (!props.visible) return;
+  if (e.key === "Escape" && props.closeOnEsc) {
     e.stopPropagation();
     emit("close");
+    return;
+  }
+  // Focus trap: Tab cycles inside the panel, never escapes to the page.
+  if (e.key === "Tab" && panelRef.value) {
+    const focusables = focusableElements(panelRef.value);
+    if (focusables.length === 0) {
+      e.preventDefault();
+      panelRef.value.focus();
+      return;
+    }
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    const active = document.activeElement as HTMLElement | null;
+    if (e.shiftKey && (active === first || active === panelRef.value)) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && active === last) {
+      e.preventDefault();
+      first.focus();
+    }
   }
 }
 
 function onMaskClick() {
   if (props.closeOnMask) emit("close");
 }
+
+watch(
+  () => props.visible,
+  async (visible) => {
+    if (visible) {
+      previouslyFocused = document.activeElement as HTMLElement | null;
+      await nextTick();
+      const first = panelRef.value
+        ? focusableElements(panelRef.value)[0]
+        : undefined;
+      (first ?? panelRef.value)?.focus();
+    } else if (previouslyFocused) {
+      previouslyFocused.focus();
+      previouslyFocused = null;
+    }
+  }
+);
 
 onMounted(() => window.addEventListener("keydown", onKeydown, true));
 onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown, true));
@@ -42,7 +90,13 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown, true));
   <Teleport to="body">
     <Transition name="dialog">
       <div v-if="visible" class="dialog-mask" @click.self="onMaskClick">
-        <div class="dialog-panel" role="dialog" aria-modal="true">
+        <div
+          ref="panelRef"
+          class="dialog-panel"
+          role="dialog"
+          aria-modal="true"
+          tabindex="-1"
+        >
           <slot />
         </div>
       </div>

@@ -1,5 +1,5 @@
 import { request } from "./http";
-import type { Book } from "../types/chapter";
+import type { Book } from "../types/book";
 
 /** List the current user's books. */
 export function listBooks(): Promise<Book[]> {

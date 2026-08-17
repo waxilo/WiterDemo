@@ -10,6 +10,26 @@ const editorRef = ref<HTMLElement | null>(null);
 /** Indent inserted by Tab while writing. */
 const TAB_INDENT = "\t";
 
+/**
+ * Commit the title on Enter (blur triggers the same flow).
+ * Escape also leaves the field; a later blur keeps the typed value.
+ */
+function onTitleKeydown(e: KeyboardEvent): void {
+  if (e.key !== "Enter" && e.key !== "Escape") return;
+  e.preventDefault();
+  (e.target as HTMLInputElement).blur();
+}
+
+/** Normalize the chapter title when the title input loses focus. */
+function onTitleBlur(): void {
+  if (!current.value) return;
+  const normalized = current.value.title.trim() || "未命名章节";
+  if (normalized !== current.value.title) {
+    current.value.title = normalized;
+    scheduleAutoSave();
+  }
+}
+
 /** Placeholder shows only when the current chapter has no content. */
 const isEmpty = computed(() => !current.value?.content);
 
@@ -28,16 +48,53 @@ watch(
   { immediate: true }
 );
 
+// --- text serialization -----------------------------------------------------
+//
+// `innerText` drops empty lines at the very end of a contenteditable (a
+// trailing Enter press is silently lost on save). We serialize the DOM
+// manually: block elements and <br> each contribute one "\n", which preserves
+// trailing blank lines. Contenteditable=plaintext-only only ever produces
+// div/br/text nodes, so this mapping is exact.
+
+const BLOCK_TAGS = new Set([
+  "DIV",
+  "P",
+  "BR",
+  "LI",
+  "BLOCKQUOTE",
+  "PRE",
+  "H1",
+  "H2",
+  "H3",
+  "H4",
+  "SECTION",
+]);
+
+function serializeNode(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) return (node as Text).data;
+  if (node.nodeType !== Node.ELEMENT_NODE) return "";
+  const el = node as HTMLElement;
+  if (el.tagName === "BR") return "\n";
+  let out = "";
+  for (const child of el.childNodes) out += serializeNode(child);
+  if (BLOCK_TAGS.has(el.tagName) && !out.endsWith("\n")) out += "\n";
+  return out;
+}
+
+function readEditorText(el: HTMLElement): string {
+  return serializeNode(el);
+}
+
 function onInput(e: Event) {
   if (!current.value) return;
-  current.value.content = (e.target as HTMLElement).innerText;
+  current.value.content = readEditorText(e.target as HTMLElement);
   scheduleAutoSave();
 }
 
 function onKeydown(e: KeyboardEvent) {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
     e.preventDefault();
-    void save();
+    void save().catch(() => undefined);
   }
 }
 
@@ -47,21 +104,21 @@ function onEditorKeydown(e: KeyboardEvent) {
   e.preventDefault();
   if (!current.value || !editorRef.value) return;
 
-  const inserted = document.execCommand("insertText", false, TAB_INDENT);
-  if (!inserted) {
-    const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0) return;
-    const range = selection.getRangeAt(0);
-    range.deleteContents();
-    const textNode = document.createTextNode(TAB_INDENT);
-    range.insertNode(textNode);
-    range.setStartAfter(textNode);
-    range.collapse(true);
-    selection.removeAllRanges();
-    selection.addRange(range);
-    current.value.content = editorRef.value.innerText;
-    scheduleAutoSave();
-  }
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) return;
+  const range = selection.getRangeAt(0);
+  if (!editorRef.value.contains(range.startContainer)) return;
+
+  // Selection API insert (document.execCommand is deprecated).
+  range.deleteContents();
+  const textNode = document.createTextNode(TAB_INDENT);
+  range.insertNode(textNode);
+  range.setStartAfter(textNode);
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  current.value.content = readEditorText(editorRef.value);
+  scheduleAutoSave();
 }
 
 onMounted(() => window.addEventListener("keydown", onKeydown));
@@ -72,22 +129,37 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
   <section class="desk">
     <template v-if="current">
       <!--
-        Scroll on the outer frame so the paper can grow with content.
-        Background rules live on .paper (not the scrollport), which avoids
-        mobile Safari cutting off lines and drifting with attachment: local.
+        The chapter title lives on the same `current` object as the sidebar
+        (useChapters mirrors it into the list), so the two stay in sync.
       -->
-      <div class="paper-scroll">
-        <article
-          :key="current.id"
-          class="paper"
-          :class="{ 'is-empty': isEmpty }"
-          data-placeholder="开始写作……"
-          contenteditable="plaintext-only"
+      <div class="paper-frame">
+        <input
+          v-model="current.title"
+          class="chapter-title"
+          placeholder="未命名章节"
+          aria-label="章节标题"
           spellcheck="false"
-          ref="editorRef"
-          @input="onInput"
-          @keydown="onEditorKeydown"
-        ></article>
+          @keydown="onTitleKeydown"
+          @blur="onTitleBlur"
+        />
+        <!--
+          Scroll on the outer frame so the paper can grow with content.
+          Background rules live on .paper (not the scrollport), which avoids
+          mobile Safari cutting off lines and drifting with attachment: local.
+        -->
+        <div class="paper-scroll">
+          <article
+            :key="current.id"
+            class="paper"
+            :class="{ 'is-empty': isEmpty }"
+            data-placeholder="开始写作……"
+            contenteditable="plaintext-only"
+            spellcheck="false"
+            ref="editorRef"
+            @input="onInput"
+            @keydown="onEditorKeydown"
+          ></article>
+        </div>
       </div>
     </template>
 
@@ -110,18 +182,55 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
   overflow: hidden;
 }
 
-.paper-scroll {
+.paper-frame {
   flex: 1;
   min-width: 0;
   min-height: 0;
   max-width: 780px;
   width: 100%;
-  overflow-x: hidden;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
   border-radius: 12px 12px 0 0;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.06);
-  background: #fffdf8;
   animation: paper-in 0.28s ease both;
+}
+
+/* Chapter title, same serif style as the manuscript below it. */
+.chapter-title {
+  box-sizing: border-box;
+  width: 100%;
+  flex-shrink: 0;
+  padding: 30px 24px 16px;
+
+  font-family: "Source Han Serif SC", "Noto Serif SC", "Songti SC", "STSong",
+    "思源宋体", serif;
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.3;
+  text-align: center;
+  color: #2b2b2b;
+  caret-color: #4f6ef7;
+
+  background: #fffdf8;
+  border: none;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  border-radius: 12px 12px 0 0;
+  outline: none;
+}
+
+.chapter-title::placeholder {
+  color: #c5bfb2;
+  font-weight: 500;
+}
+
+.paper-scroll {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: #fffdf8;
 }
 
 /*
@@ -229,10 +338,15 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
     padding: 8px 8px 0;
   }
 
-  .paper-scroll {
+  .paper-frame {
     max-width: none;
     border-radius: 10px 10px 0 0;
     box-shadow: 0 6px 24px rgba(0, 0, 0, 0.05);
+  }
+
+  .chapter-title {
+    padding: 18px 14px 10px;
+    font-size: 20px;
   }
 
   .paper {

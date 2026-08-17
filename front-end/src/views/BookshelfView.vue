@@ -3,6 +3,7 @@ import { onMounted, onUnmounted, ref, computed } from "vue";
 import type { useBooks } from "../composables/useBooks";
 import BookCard from "../components/BookCard.vue";
 import { useConfirm } from "../composables/useConfirm";
+import { showToast } from "../composables/useToast";
 
 const confirm = useConfirm();
 
@@ -26,7 +27,11 @@ onMounted(() => {
 onUnmounted(() => window.removeEventListener("keydown", onEsc));
 
 async function onCreate() {
-  await create();
+  try {
+    await create();
+  } catch (e) {
+    showToast(e instanceof Error ? e.message : "创建失败", "error");
+  }
 }
 
 async function onRemove(id: number) {
@@ -35,7 +40,13 @@ async function onRemove(id: number) {
     message: "删除后将删除所有章节，\n该操作不可恢复。",
     confirmText: "删除",
   });
-  if (ok) await remove(id);
+  if (ok) {
+    try {
+      await remove(id);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "删除失败", "error");
+    }
+  }
 }
 
 // --- user menu ---------------------------------------------------------------

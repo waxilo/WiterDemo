@@ -1,15 +1,3 @@
-/** A book (writing project) belonging to the user. */
-export interface Book {
-  id: number;
-  title: string;
-  sortOrder: number;
-  updateTime: string;
-  /** Number of chapters (optional: older API responses may omit it). */
-  chapterCount?: number;
-  /** Total character count across chapters (optional). */
-  wordCount?: number;
-}
-
 /** Chapter list item (no content). */
 export interface ChapterSummary {
   id: number;
@@ -28,11 +16,18 @@ export interface Chapter extends ChapterSummary {
   content: string;
   contentHash: string | null;
   createTime: string;
+  /** Optimistic-lock counter, bumped on every server save. */
+  version: number;
 }
 
-/** Payload for saving a chapter. */
+/**
+ * Payload for saving a chapter. `baseVersion` is the version the client
+ * loaded; the server conditions the write on it and refuses (409) if it no
+ * longer matches, so two windows editing the same chapter cannot silently
+ * overwrite each other.
+ */
 export interface SaveChapterPayload {
   title: string;
   content: string;
-  hash: string;
+  baseVersion: number;
 }

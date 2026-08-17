@@ -11,8 +11,6 @@ export interface AuthTokens {
   expiresIn: number;
 }
 
-export type LoginResult = AuthTokens;
-
 /** Current user info returned by GET /me. */
 export interface UserInfo {
   id: number;

@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { nextTick, onMounted, onUnmounted, ref, watch, computed } from "vue";
 import type { ChapterSummary } from "../types/chapter";
 import { formatCount } from "../utils/textStats";
 
 const MOBILE_BREAKPOINT = "(max-width: 760px)";
 const CONTEXT_MENU_WIDTH = 168;
-const CONTEXT_MENU_HEIGHT = 132;
+const CONTEXT_MENU_HEIGHT = 236;
 const LONG_PRESS_MS = 480;
 const LONG_PRESS_MOVE_PX = 10;
 
@@ -215,6 +215,30 @@ function duplicateFromMenu(): void {
   if (id !== null) emit("duplicate", id);
 }
 
+/** Index of the chapter the context menu is open for (-1 when closed). */
+const contextChapterIndex = computed(() => {
+  const id = contextMenu.value.chapterId;
+  if (id === null) return -1;
+  return items.value.findIndex((c) => c.id === id);
+});
+
+/**
+ * Move the context-menu chapter up/down one slot. Works on touch devices too
+ * (the long-press menu), where HTML5 drag & drop is unavailable.
+ */
+function moveChapter(direction: -1 | 1): void {
+  const index = contextChapterIndex.value;
+  if (index < 0) return;
+  const target = index + direction;
+  if (target < 0 || target >= items.value.length) return;
+
+  const list = items.value;
+  const [moved] = list.splice(index, 1);
+  list.splice(target, 0, moved);
+  closeContextMenu();
+  emit("reorder", list.map((c) => c.id));
+}
+
 function removeFromMenu(): void {
   const id = contextMenu.value.chapterId;
   closeContextMenu();
@@ -311,7 +335,7 @@ function finishDrag() {
       还没有章节，点击右上角 + 新建
     </p>
 
-    <nav v-if="!isCollapsed" class="items">
+    <nav v-if="!isCollapsed" class="items" role="list">
       <div
         v-for="(ch, index) in items"
         :key="ch.id"
@@ -321,8 +345,14 @@ function finishDrag() {
           dragging: dragIndex === index,
           editing: editingId === ch.id,
         }"
+        role="listitem"
+        tabindex="0"
+        :aria-current="ch.id === currentId ? 'true' : undefined"
+        :aria-label="`章节：${ch.title || '未命名章节'}`"
         :draggable="editingId !== ch.id"
         @click="onSelect(ch.id)"
+        @keydown.enter="onSelect(ch.id)"
+        @keydown.space.prevent="onSelect(ch.id)"
         @contextmenu.prevent="openContextMenu(ch, $event)"
         @touchstart.passive="onItemTouchStart(ch, $event)"
         @touchmove.passive="onItemTouchMove($event)"
@@ -388,6 +418,25 @@ function finishDrag() {
         </button>
         <button class="context-item" role="menuitem" @click="duplicateFromMenu">
           复制章节
+        </button>
+        <button
+          class="context-item"
+          role="menuitem"
+          :disabled="contextChapterIndex <= 0"
+          @click="moveChapter(-1)"
+        >
+          上移
+        </button>
+        <button
+          class="context-item"
+          role="menuitem"
+          :disabled="
+            contextChapterIndex === -1 ||
+            contextChapterIndex >= items.length - 1
+          "
+          @click="moveChapter(1)"
+        >
+          下移
         </button>
         <div class="context-separator"></div>
         <button
@@ -687,6 +736,15 @@ function finishDrag() {
 
 .context-item:hover {
   background: #f5f3ee;
+}
+
+.context-item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.context-item:disabled:hover {
+  background: transparent;
 }
 
 .context-item.danger {
