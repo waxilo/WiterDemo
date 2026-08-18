@@ -5,11 +5,13 @@ export interface AuthResult {
   success: boolean;
   message?: string;
   userId?: number;
+  /** Refresh-session id embedded in the access token (may be absent). */
+  sid?: string;
 }
 
 /**
  * Stateless auth check: verify the Bearer token's signature and expiry, and
- * return the embedded user id. No database access.
+ * return the embedded user id + session id. No database access.
  */
 export async function checkAuth(ctx: Ctx): Promise<AuthResult> {
   const header = ctx.request.headers.get("Authorization");
@@ -27,5 +29,5 @@ export async function checkAuth(ctx: Ctx): Promise<AuthResult> {
     return { success: false, message: "请重新登录" };
   }
 
-  return { success: true, userId: result.userId };
+  return { success: true, userId: result.userId, sid: result.sid };
 }

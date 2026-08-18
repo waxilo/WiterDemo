@@ -30,7 +30,6 @@ const {
   saving,
   dirty,
   saveError,
-  remoteConflict,
   select,
   create,
   remove,
@@ -38,10 +37,6 @@ const {
   duplicate,
   reorder,
   flush,
-  startSync,
-  stopSync,
-  loadRemote,
-  overwriteRemote,
 } = props.chapters;
 
 /** Save-state indicator shown in the top bar (only when a chapter is open). */
@@ -185,15 +180,11 @@ onMounted(() => {
   relativeTimeTimer = setInterval(() => {
     now.value = Date.now();
   }, 30_000);
-  // Multi-device sync: poll the chapter list so other devices' edits become
-  // visible and remote conflicts surface as the conflict bar.
-  startSync();
 });
 
 onUnmounted(() => {
   window.removeEventListener("keydown", onEsc);
   if (relativeTimeTimer !== null) clearInterval(relativeTimeTimer);
-  stopSync();
 });
 
 function onEsc(e: KeyboardEvent) {
@@ -260,26 +251,6 @@ function onReorder(ids: number[]) {
     reorder(bookId.value, ids).catch((error: unknown) => {
       showToast(error instanceof Error ? error.message : "排序失败", "error");
     });
-  }
-}
-
-// --- remote conflict bar -----------------------------------------------------
-
-async function onLoadRemote() {
-  try {
-    await loadRemote();
-    showToast("已加载其他设备的版本", "info");
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : "加载失败", "error");
-  }
-}
-
-async function onOverwriteRemote() {
-  try {
-    await overwriteRemote();
-    showToast("已保存，覆盖了其他设备的修改", "success");
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : "保存失败", "error");
   }
 }
 </script>
@@ -388,19 +359,6 @@ async function onOverwriteRemote() {
         @reorder="onReorder"
       />
       <div class="editor-column">
-        <Transition name="conflict">
-          <div v-if="remoteConflict" class="conflict-bar" role="alert">
-            <span class="conflict-text">另一设备已更新此章节</span>
-            <div class="conflict-actions">
-              <button class="conflict-btn" @click="onLoadRemote">
-                加载最新（丢弃本地修改）
-              </button>
-              <button class="conflict-btn primary" @click="onOverwriteRemote">
-                覆盖保存（保留我的内容）
-              </button>
-            </div>
-          </div>
-        </Transition>
         <ChapterEditor :chapters="chapters" />
         <footer class="writing-status">
           <div class="status-overall">
@@ -726,72 +684,188 @@ async function onOverwriteRemote() {
   flex-direction: column;
 }
 
-/* ---- remote conflict bar ---- */
-.conflict-bar {
-  flex-shrink: 0;
-  display: flex;
+.writing-status b {
+  display: inline-block;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.save-meta.saving {
+  color: #78849c;
+}
+
+.save-meta.dirty {
+  color: #a48a56;
+}
+
+.save-meta.error {
+  color: #c45d55;
+  font-weight: 600;
+}
+
+.book-title:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.book-title-input {
+  box-sizing: border-box;
+  width: 100%;
+  font-size: 18px;
+  font-weight: 600;
+  color: #2a2a2a;
+  text-align: center;
+  padding: 0.25em 0.6em;
+  border: 1px solid #dcd7cb;
+  border-radius: 8px;
+  outline: none;
+  background: #fffdf8;
+  min-width: 220px;
+}
+
+/* ---- user menu ---- */
+.user {
+  position: relative;
+}
+
+.user-trigger {
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 9px 20px;
-  background: #fdf6e3;
-  border-bottom: 1px solid rgba(196, 150, 60, 0.28);
-  font-size: 13px;
-  color: #7a5c1e;
-}
-
-.conflict-text {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 500;
-}
-
-.conflict-text::before {
-  content: "⚡";
-  font-size: 14px;
-}
-
-.conflict-actions {
-  display: flex;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.conflict-btn {
-  padding: 5px 12px;
-  font-size: 12.5px;
-  color: #7a5c1e;
+  gap: 0.5em;
+  padding: 0.3em 0.5em 0.3em 0.35em;
   background: transparent;
-  border: 1px solid rgba(196, 150, 60, 0.45);
-  border-radius: 7px;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  color: #555;
+  transition: background 0.2s ease;
+}
+
+.user-trigger:hover,
+.user-trigger.open {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #eef1f7, #e3e8f2);
+  color: #6b7a9c;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.uname {
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: #444;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chevron {
+  color: #aaa;
+  transition: transform 0.2s ease;
+}
+
+.user-trigger.open .chevron {
+  transform: rotate(180deg);
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 168px;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.07);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+  z-index: 30;
+}
+
+.menu-item {
+  display: block;
+  width: 100%;
+  padding: 0.55em 0.7em;
+  font-size: 0.88rem;
+  text-align: left;
+  color: #444;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
 }
 
-.conflict-btn:hover {
-  background: rgba(196, 150, 60, 0.12);
+.menu-item:hover {
+  background: #f5f4f0;
 }
 
-.conflict-btn.primary {
-  color: #fff;
-  background: #c4963c;
-  border-color: #c4963c;
+.menu-item.danger {
+  color: #d9645a;
 }
 
-.conflict-btn.primary:hover {
-  background: #b0852f;
+.menu-item.danger:hover {
+  background: rgba(217, 100, 90, 0.09);
 }
 
-.conflict-enter-active,
-.conflict-leave-active {
+.menu-sep {
+  height: 1px;
+  margin: 6px 4px;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 15;
+}
+
+/* ---- transitions ---- */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+.menu-enter-active,
+.menu-leave-active {
   transition: opacity 0.18s ease, transform 0.18s ease;
 }
 
-.conflict-enter-from,
-.conflict-leave-to {
+.menu-enter-from,
+.menu-leave-to {
   opacity: 0;
-  transform: translateY(-4px);
+  transform: translateY(-6px);
+}
+
+/* ---- body ---- */
+.panes {
+  position: relative;
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.editor-column {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .writing-status {

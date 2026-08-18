@@ -2,6 +2,7 @@ import { login, register, refresh, logout } from "./controller/login";
 import * as userController from "./controller/user";
 import * as bookController from "./controller/book";
 import * as chapterController from "./controller/chapter";
+import * as sessionService from "./service/SessionService";
 import { checkAuth } from "./middleware/auth";
 import { jsonResponse } from "./response";
 import type { Ctx } from "./context";
@@ -71,6 +72,26 @@ export async function router(ctx: Ctx): Promise<Response> {
     return jsonResponse(null, 401, auth.message ?? "未登录");
   }
   ctx.userId = auth.userId!;
+  ctx.userSid = auth.sid;
+
+  /**
+   * Single-active-session policy: after ANY successful write (2xx), every
+   * other session of the same account is revoked, so concurrent multi-device
+   * editing is impossible by construction. Safe when the access token carries
+   * no sid (legacy tokens): we simply skip the kick rather than risk
+   * revoking the caller itself.
+   */
+  const afterWrite = async (res: Promise<Response> | Response): Promise<Response> => {
+    const response = await res;
+    if (
+      response.status < 400 &&
+      response.status !== 204 &&
+      ctx.userSid !== undefined
+    ) {
+      await sessionService.revokeAllExcept(ctx.env, ctx.userId, ctx.userSid);
+    }
+    return response;
+  };
 
   // /me — current user info
   if (isMe) {
@@ -81,15 +102,15 @@ export async function router(ctx: Ctx): Promise<Response> {
   // /books
   if (isBooks) {
     if (method === "GET") return bookController.listBooks(ctx);
-    if (method === "POST") return bookController.createBook(ctx);
+    if (method === "POST") return afterWrite(bookController.createBook(ctx));
     return jsonResponse(null, 404, "Not Found API");
   }
 
   // /books/:id
   if (isBookId && bookId !== undefined) {
     ctx.params.id = bookId;
-    if (method === "PUT") return bookController.renameBook(ctx);
-    if (method === "DELETE") return bookController.deleteBook(ctx);
+    if (method === "PUT") return afterWrite(bookController.renameBook(ctx));
+    if (method === "DELETE") return afterWrite(bookController.deleteBook(ctx));
     return jsonResponse(null, 404, "Not Found API");
   }
 
@@ -97,8 +118,8 @@ export async function router(ctx: Ctx): Promise<Response> {
   if (isBookChapters && bookId !== undefined) {
     ctx.params.bookId = bookId;
     if (method === "GET") return chapterController.listChapters(ctx);
-    if (method === "POST") return chapterController.createChapter(ctx);
-    if (method === "PUT") return chapterController.reorderChapters(ctx);
+    if (method === "POST") return afterWrite(chapterController.createChapter(ctx));
+    if (method === "PUT") return afterWrite(chapterController.reorderChapters(ctx));
     return jsonResponse(null, 404, "Not Found API");
   }
 
@@ -106,8 +127,8 @@ export async function router(ctx: Ctx): Promise<Response> {
   if (isChapterId && chapterId !== undefined) {
     ctx.params.id = chapterId;
     if (method === "GET") return chapterController.getChapter(ctx);
-    if (method === "PUT") return chapterController.saveChapter(ctx);
-    if (method === "DELETE") return chapterController.deleteChapter(ctx);
+    if (method === "PUT") return afterWrite(chapterController.saveChapter(ctx));
+    if (method === "DELETE") return afterWrite(chapterController.deleteChapter(ctx));
     return jsonResponse(null, 404, "Not Found API");
   }
 

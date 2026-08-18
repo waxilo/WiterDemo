@@ -23,6 +23,20 @@ test("access token round-trip", async () => {
   assert.equal(check.userId, 42);
 });
 
+test("access token carries the session id (sid)", async () => {
+  const token = await createAccessToken(7, env, "session-abc");
+  const check = await verifyAccess(token, env);
+  assert.equal(check.success, true);
+  assert.equal(check.sid, "session-abc");
+});
+
+test("access token without sid verifies without one", async () => {
+  const token = await createAccessToken(7, env);
+  const check = await verifyAccess(token, env);
+  assert.equal(check.success, true);
+  assert.equal(check.sid, undefined);
+});
+
 test("refresh token round-trip carries a jti", async () => {
   const { token, jti } = await createRefreshToken(7, env);
   assert.ok(jti.length > 0);

@@ -70,6 +70,8 @@ export interface Chapter extends ChapterSummary {
 export interface TokenCheck {
   success: boolean;
   userId?: number;
+  /** Refresh-session id embedded in the access token (may be absent on old tokens). */
+  sid?: string;
 }
 
 /** Row shape for t_user. */

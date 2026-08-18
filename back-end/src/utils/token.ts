@@ -21,6 +21,12 @@ interface AccessPayload {
   iat: number;
   exp: number;
   typ: "access";
+  /**
+   * The refresh-token session id this access token belongs to. Lets write
+   * operations revoke every OTHER session of the same account while keeping
+   * the calling session alive (single-active-session policy).
+   */
+  sid?: string;
 }
 
 interface RefreshPayload {
@@ -137,10 +143,18 @@ async function verifyJwt<T extends AnyPayload>(
   return payload;
 }
 
-/** Issue a short-lived access token for the given user id. */
-export function createAccessToken(userId: number, env: Env): Promise<string> {
+/** Issue a short-lived access token for the given user id, tied to a session. */
+export function createAccessToken(
+  userId: number,
+  env: Env,
+  sid?: string
+): Promise<string> {
   return signJwt(
-    { uid: userId, typ: "access" satisfies TokenType },
+    {
+      uid: userId,
+      typ: "access" satisfies TokenType,
+      ...(sid ? { sid } : {}),
+    },
     ACCESS_TTL,
     env.TOKEN_SECRET
   );
@@ -163,7 +177,7 @@ export async function createRefreshToken(
   return { token, jti, ttlMs: REFRESH_TTL * 1000 };
 }
 
-/** Verify an access token; returns the embedded user id on success. */
+/** Verify an access token; returns the embedded user id (and sid, if any). */
 export async function verifyAccess(
   token: string,
   env: Env
@@ -172,7 +186,7 @@ export async function verifyAccess(
   if (!payload || payload.typ !== "access" || typeof payload.uid !== "number") {
     return { success: false };
   }
-  return { success: true, userId: payload.uid };
+  return { success: true, userId: payload.uid, sid: payload.sid };
 }
 
 /** Verify a refresh token; returns the embedded user id and jti on success. */

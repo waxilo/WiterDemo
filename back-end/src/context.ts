@@ -14,6 +14,8 @@ export interface Ctx {
   params: Record<string, string>;
   /** Authenticated user id, set by checkAuth after token verification. */
   userId: number;
+  /** Refresh-session id from the access token (may be absent on old tokens). */
+  userSid: string | undefined;
   /** Lazily parse and cache the JSON request body. */
   json<T>(): Promise<T>;
 }
@@ -30,6 +32,7 @@ export function createContext(request: Request, env: Env): Ctx {
     method: request.method,
     params: {},
     userId: 0,
+    userSid: undefined,
     json<T>(): Promise<T> {
       if (!bodyPromise) {
         bodyPromise = request

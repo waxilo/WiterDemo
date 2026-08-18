@@ -5,7 +5,6 @@ import { syncRequest, ApiClientError } from "../api/http";
 import type { Chapter, ChapterSummary } from "../types/chapter";
 import { AUTOSAVE_IDLE_MS } from "../config";
 import { getTextStats } from "../utils/textStats";
-import { showToast } from "./useToast";
 
 /** Client-side dirty marker: md5 of the JSON {title, content}. */
 function hashOf(title: string, content: string): string {
@@ -24,9 +23,6 @@ function toSummary(chapter: Chapter): ChapterSummary {
   };
 }
 
-/** Multi-device sync poll interval (lightweight list re-fetch). */
-const SYNC_INTERVAL_MS = 20_000;
-
 /**
  * Chapter state for the currently open book: the chapter list, the selected
  * chapter (with editable title/content), and save logic (manual Ctrl+S,
@@ -41,17 +37,9 @@ export function useChapters() {
   /** Message of the last failed save (cleared on the next successful save). */
   const saveError = ref<string | null>(null);
   const savedHash = ref<string | null>(null);
-  /**
-   * A remote device saved this chapter while we have unsaved local edits.
-   * The conflict bar offers "load latest" (discard local) or "overwrite save".
-   */
-  const remoteConflict = ref<{ version: number; updateTime: string } | null>(
-    null
-  );
 
   let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
   let saveQueued = false;
-  let syncTimer: ReturnType<typeof setInterval> | null = null;
 
   function currentHash(): string {
     if (!current.value) return "";
@@ -88,164 +76,11 @@ export function useChapters() {
   /** Reset all chapter state synchronously (e.g. logout / opening a book). */
   function reset(): void {
     clearAutoSaveTimer();
-    stopSync();
     saveQueued = false;
     list.value = [];
     current.value = null;
     savedHash.value = null;
     saveError.value = null;
-    remoteConflict.value = null;
-  }
-
-  // --- multi-device sync (poll + conflict bar) ------------------------------
-
-  /**
-   * Re-fetch the chapter list and reconcile it with local state:
-   * - new/renamed/reordered/deleted chapters are merged into the sidebar;
-   * - if the OPEN chapter changed remotely while we have unsaved edits, a
-   *   conflict is surfaced for the user to resolve (load latest / overwrite);
-   * - if we have no unsaved edits, remote changes are adopted silently.
-   */
-  async function syncFromServer(): Promise<void> {
-    const bookId = current.value?.bookId;
-    if (bookId === undefined) return;
-    let freshList: ChapterSummary[];
-    try {
-      freshList = await chapterApi.listChapters(bookId);
-    } catch {
-      return; // transient failure: try again next tick, stay silent
-    }
-    mergeChapterList(freshList);
-  }
-
-  function mergeChapterList(freshList: ChapterSummary[]): void {
-    const currentId = current.value?.id;
-    const byId = new Map(list.value.map((c) => [c.id, c]));
-    const seen = new Set<number>();
-    const next: ChapterSummary[] = [];
-
-    for (const fresh of freshList) {
-      seen.add(fresh.id);
-      const local = byId.get(fresh.id);
-      if (!local) {
-        // Created on another device.
-        next.push(fresh);
-        continue;
-      }
-      // The server always sends version; guard for type compatibility only.
-      const freshVersion = fresh.version;
-
-      if (fresh.id === currentId && dirty.value) {
-        // Local unsaved edits: never clobber local fields. If the remote
-        // version moved, surface the conflict bar.
-        if (
-          current.value &&
-          freshVersion !== undefined &&
-          freshVersion !== current.value.version
-        ) {
-          remoteConflict.value = {
-            version: freshVersion,
-            updateTime: fresh.updateTime,
-          };
-        }
-        next.push(local);
-        continue;
-      }
-
-      if (freshVersion !== undefined && freshVersion !== local.version) {
-        // Changed remotely and we are clean: adopt metadata (title/order/
-        // counts), and for the open chapter also update the editable object
-        // (re-basing savedHash so we don't turn "clean" into "dirty").
-        next.push({ ...fresh });
-        if (fresh.id === currentId && current.value) {
-          const wasContent = current.value.content;
-          current.value.title = fresh.title;
-          current.value.updateTime = fresh.updateTime;
-          current.value.version = freshVersion;
-          current.value.wordCount = fresh.wordCount;
-          current.value.charCount = fresh.charCount;
-          savedHash.value = hashOf(fresh.title, wasContent);
-        }
-      } else {
-        next.push(local);
-      }
-    }
-
-    // Chapters deleted on another device.
-    for (const local of list.value) {
-      if (seen.has(local.id)) continue;
-      if (local.id === currentId) {
-        current.value = null;
-        savedHash.value = null;
-        saveError.value = null;
-        remoteConflict.value = null;
-        showToast("当前章节已被其他设备删除", "info");
-      }
-    }
-
-    if (next.length !== list.value.length) list.value = next;
-    else {
-      // Order may still have changed even with the same length.
-      const sameOrder = next.every((c, i) => list.value[i]?.id === c.id);
-      if (!sameOrder) list.value = next;
-    }
-  }
-
-  /** Start the periodic multi-device sync (call while the editor is active). */
-  function startSync(): void {
-    stopSync();
-    syncTimer = setInterval(() => {
-      void syncFromServer();
-    }, SYNC_INTERVAL_MS);
-  }
-
-  function stopSync(): void {
-    if (syncTimer !== null) {
-      clearInterval(syncTimer);
-      syncTimer = null;
-    }
-  }
-
-  /**
-   * "Load latest": discard local edits and adopt the server version of the
-   * open chapter (resolves the conflict bar).
-   */
-  async function loadRemote(): Promise<void> {
-    const chapter = current.value;
-    if (!chapter) return;
-    try {
-      const fresh = await chapterApi.getChapter(chapter.id);
-      if (current.value?.id !== chapter.id) return; // switched meanwhile
-      current.value = fresh;
-      savedHash.value = hashOf(fresh.title, fresh.content);
-      saveError.value = null;
-      remoteConflict.value = null;
-      const item = list.value.find((c) => c.id === fresh.id);
-      if (item) Object.assign(item, toSummary(fresh));
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  /**
-   * "Overwrite save": keep local edits, align our base version with the
-   * server and save immediately (resolves the conflict bar).
-   */
-  async function overwriteRemote(): Promise<void> {
-    const chapter = current.value;
-    const conflict = remoteConflict.value;
-    if (!chapter || !conflict) return;
-    chapter.version = conflict.version;
-    remoteConflict.value = null;
-    try {
-      await save();
-    } catch (error) {
-      // Failed again (e.g. another race): restore the conflict bar.
-      if (error instanceof ApiClientError && error.code === 409) {
-        remoteConflict.value = conflict;
-      }
-      throw error;
-    }
   }
 
   async function loadList(bookId: number): Promise<void> {
@@ -267,8 +102,6 @@ export function useChapters() {
     current.value = chapter;
     // Seed savedHash from the loaded content so it starts "clean".
     savedHash.value = hashOf(chapter.title, chapter.content);
-    // A conflict belonged to the previous chapter; resolve on switch.
-    remoteConflict.value = null;
   }
 
   async function create(bookId: number): Promise<void> {
@@ -305,10 +138,8 @@ export function useChapters() {
       chapter.version = saved.version;
       chapter.contentHash = saved.contentHash;
       // A successful save clears any previous failure (failure keeps its
-      // message so repeated retries don't re-toast the same error) and any
-      // outstanding remote-conflict state.
+      // message so repeated retries don't re-toast the same error).
       saveError.value = null;
-      remoteConflict.value = null;
       // Reflect updated metadata in the list.
       const item = list.value.find((c) => c.id === saved.id);
       if (item) {
@@ -320,23 +151,20 @@ export function useChapters() {
     } catch (error) {
       saveError.value = error instanceof Error ? error.message : "保存失败";
       if (error instanceof ApiClientError && error.code === 409) {
-        // Conflict: another device saved this chapter while we were editing.
-        // Fetch the server state and surface the conflict bar — the user
-        // chooses "load latest" (discard local) or "overwrite save". We do
-        // NOT auto-retry: a retry would just 409 again and, worse, would
-        // block chapter switching via flush() until the conflict is resolved.
+        // Race window only: with the single-active-session policy the other
+        // device is kicked the moment its own write succeeds, so a 409 here
+        // means both devices wrote in flight. Align our base version and
+        // retry once — the retry cannot lose to a third write.
         saveQueued = false;
         try {
           const fresh = await chapterApi.getChapter(chapter.id);
           if (current.value?.id === chapter.id) {
-            remoteConflict.value = {
-              version: fresh.version,
-              updateTime: fresh.updateTime,
-            };
+            current.value.version = fresh.version;
           }
         } catch {
           // Could not fetch the server state; keep the saveError message.
         }
+        scheduleAutoSave();
       } else {
         // Transient failure: retry once the idle period passes (no new input
         // required). A failed save must not leave a stale queued flag.
@@ -478,7 +306,6 @@ export function useChapters() {
     saving,
     dirty,
     saveError,
-    remoteConflict,
     loadList,
     select,
     create,
@@ -491,10 +318,5 @@ export function useChapters() {
     rename,
     duplicate,
     reorder,
-    startSync,
-    stopSync,
-    syncFromServer,
-    loadRemote,
-    overwriteRemote,
   };
 }

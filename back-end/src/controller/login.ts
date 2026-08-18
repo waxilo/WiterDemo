@@ -71,16 +71,22 @@ export async function refresh(ctx: Ctx): Promise<Response> {
       await sessionService.revokeAllForUser(ctx.env, check.uid);
       return jsonResponse(null, 401, "登录状态已失效");
     }
-    // Revoked (just rotated elsewhere) or expired -> let the client retry.
-    return jsonResponse(null, 401, "请重新登录");
+    if (row.revoked === 1) {
+      // Kicked by the single-active-session policy (another device wrote) or
+      // logged out — the client force-logs out with a clear reason.
+      return jsonResponse(null, 401, "账号已在其他设备使用，请重新登录");
+    }
+    // Expired -> let the client retry with a fresh login.
+    return jsonResponse(null, 401, "登录已失效，请重新登录");
   }
 
-  const accessToken = await createAccessToken(check.uid, ctx.env);
   const {
     token: newRefresh,
     jti: newJti,
     ttlMs,
   } = await createRefreshToken(check.uid, ctx.env);
+  // New access token tied to the rotated session.
+  const accessToken = await createAccessToken(check.uid, ctx.env, newJti);
   const rotated = await sessionService.rotateSession(
     ctx.env,
     check.uid,

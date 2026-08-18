@@ -80,6 +80,12 @@ async function refreshWith(refreshToken: string, isRetry: boolean): Promise<bool
       // keep the session and let the next attempt retry.
       if (json.code === 401) {
         cancelProactiveRefresh();
+        // Surface the reason (e.g. "账号已在其他设备使用" after the
+        // single-active-session kick) before dropping to the login screen.
+        if (json.message && typeof window !== "undefined") {
+          const { showToast } = await import("../composables/useToast");
+          showToast(json.message, "error");
+        }
         clearSession();
       }
       return false;

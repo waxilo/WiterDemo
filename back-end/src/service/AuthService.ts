@@ -112,8 +112,10 @@ export async function issueTokens(
   userId: number,
   env: Env
 ): Promise<AuthTokens> {
-  const accessToken = await createAccessToken(userId, env);
   const { token, jti, ttlMs } = await createRefreshToken(userId, env);
+  // The access token is tied to the refresh session so write operations can
+  // revoke every OTHER session of this account while keeping this one.
+  const accessToken = await createAccessToken(userId, env, jti);
   await createSession(env, userId, jti, token, ttlMs);
   return { accessToken, refreshToken: token, expiresIn: ACCESS_TTL };
 }
