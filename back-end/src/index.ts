@@ -44,7 +44,7 @@ export default {
       // else is an internal bug and must not leak internals.
       if (error instanceof ApiError) {
         status = error.status;
-        return jsonResponse(null, error.status, error.message);
+        return jsonResponse(error.data ?? null, error.status, error.message);
       }
       console.error("unhandled error", error);
       return jsonResponse(null, 500, "服务端异常");

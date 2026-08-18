@@ -246,30 +246,33 @@ export async function request<T>(
   if (json.code === 401) {
     cancelProactiveRefresh();
     clearSession();
-    throw clientError(json.code, json.message || "登录已失效，请重新登录");
+    throw clientError(json.code, json.message || "登录已失效，请重新登录", json.data);
   }
   if (json.code !== 200) {
-    throw clientError(json.code, json.message || `Unexpected code: ${json.code}`);
+    throw clientError(json.code, json.message || `Unexpected code: ${json.code}`, json.data);
   }
   return json.data;
 }
 
 /**
  * Error thrown for business-code failures. Carries the backend `code` (e.g.
- * 409) so callers can branch on the failure kind, not just the message.
+ * 409) and the envelope `data` (e.g. the server's current version on a
+ * conflict) so callers can branch on the failure kind and recover without
+ * extra round-trips.
  */
 export class ApiClientError extends Error {
   constructor(
     public readonly code: number,
-    message: string
+    message: string,
+    public readonly data?: unknown
   ) {
     super(message);
     this.name = "ApiClientError";
   }
 }
 
-function clientError(code: number, message: string): ApiClientError {
-  return new ApiClientError(code, message);
+function clientError(code: number, message: string, data?: unknown): ApiClientError {
+  return new ApiClientError(code, message, data);
 }
 
 /**

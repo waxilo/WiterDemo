@@ -40,6 +40,8 @@ export function useChapters() {
 
   let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
   let saveQueued = false;
+  /** Guards the immediate post-conflict retry against infinite loops. */
+  let conflictRetryInFlight = false;
 
   function currentHash(): string {
     if (!current.value) return "";
@@ -153,18 +155,32 @@ export function useChapters() {
       if (error instanceof ApiClientError && error.code === 409) {
         // Race window only: with the single-active-session policy the other
         // device is kicked the moment its own write succeeds, so a 409 here
-        // means both devices wrote in flight. Align our base version and
-        // retry once — the retry cannot lose to a third write.
+        // means both devices wrote in flight. The server told us its current
+        // version — align and retry immediately (a third write cannot win
+        // while we hold the session). Not rethrown: the follow-up save is
+        // guaranteed to persist the content, so callers (flush/select) may
+        // proceed.
         saveQueued = false;
-        try {
-          const fresh = await chapterApi.getChapter(chapter.id);
-          if (current.value?.id === chapter.id) {
-            current.value.version = fresh.version;
-          }
-        } catch {
-          // Could not fetch the server state; keep the saveError message.
+        const serverVersion = (error.data as { version?: number } | undefined)
+          ?.version;
+        if (
+          typeof serverVersion === "number" &&
+          current.value?.id === chapter.id &&
+          !conflictRetryInFlight
+        ) {
+          current.value.version = serverVersion;
+          conflictRetryInFlight = true;
+          void save()
+            .catch(() => undefined)
+            .finally(() => {
+              conflictRetryInFlight = false;
+            });
+          return;
         }
+        // Second consecutive conflict (or data missing): fall back to a
+        // delayed retry and let the error propagate.
         scheduleAutoSave();
+        throw error;
       } else {
         // Transient failure: retry once the idle period passes (no new input
         // required). A failed save must not leave a stale queued flag.

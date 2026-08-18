@@ -165,15 +165,23 @@ export async function saveChapter(
 
   if (!updated) {
     if (useVersion) {
-      // Zero rows matched: another window saved in between -> conflict.
-      throw new ApiError(409, "章节已在其他窗口被修改，继续编辑将覆盖对方内容");
+      // Zero rows matched: another device saved in between -> conflict. The
+      // payload carries the server's current state so the client can align
+      // its base version without an extra round-trip (or fetching content).
+      throw new ApiError(409, "章节已在其他设备被修改，已自动重试保存", {
+        version: row.version,
+        updateTime: row.update_time,
+      });
     }
     // Legacy path: pre-check update_time (best effort, second precision).
     if (
       input.baseUpdateTime !== undefined &&
       row.update_time !== input.baseUpdateTime
     ) {
-      throw new ApiError(409, "章节已在其他窗口被修改，继续编辑将覆盖对方内容");
+      throw new ApiError(409, "章节已在其他设备被修改，已自动重试保存", {
+        version: row.version,
+        updateTime: row.update_time,
+      });
     }
     throw new ApiError(500, "保存章节失败");
   }
