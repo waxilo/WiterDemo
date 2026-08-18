@@ -75,12 +75,29 @@ export async function router(ctx: Ctx): Promise<Response> {
   ctx.userSid = auth.sid;
 
   /**
-   * Single-active-session policy: after ANY successful write (2xx), every
-   * other session of the same account is revoked, so concurrent multi-device
-   * editing is impossible by construction. Safe when the access token carries
-   * no sid (legacy tokens): we simply skip the kick rather than risk
-   * revoking the caller itself.
+   * Single-active-session policy. Two layers:
+   *
+   * 1. PRE-CHECK (below): a write whose session was already revoked (kicked
+   *    by another device, or rotated away by its own token refresh) is
+   *    rejected with 401 BEFORE touching data. This also protects against the
+   *    stale-AT race: an in-flight request using a pre-refresh access token
+   *    (sid = old session) cannot accidentally kick the fresh session.
+   * 2. POST-WRITE (afterWrite): after any successful write, every OTHER
+   *    session of the account is revoked.
    */
+  const isWrite = method === "POST" || method === "PUT" || method === "DELETE";
+  if (isWrite && ctx.userSid !== undefined) {
+    const mine = await sessionService.findSession(
+      ctx.env,
+      ctx.userId,
+      ctx.userSid
+    );
+    if (!mine || mine.revoked === 1) {
+      return jsonResponse(null, 401, "账号已在其他设备使用，请重新登录");
+    }
+  }
+
+  /** Kick all other sessions after a successful write; never fails the request. */
   const afterWrite = async (res: Promise<Response> | Response): Promise<Response> => {
     const response = await res;
     if (
@@ -88,7 +105,10 @@ export async function router(ctx: Ctx): Promise<Response> {
       response.status !== 204 &&
       ctx.userSid !== undefined
     ) {
-      await sessionService.revokeAllExcept(ctx.env, ctx.userId, ctx.userSid);
+      // Best effort: a failed kick must not turn a successful write into 500.
+      await sessionService
+        .revokeAllExcept(ctx.env, ctx.userId, ctx.userSid)
+        .catch(() => undefined);
     }
     return response;
   };

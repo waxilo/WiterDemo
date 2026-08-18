@@ -14,6 +14,7 @@
 import { API_BASE_URL } from "../config";
 import type { ApiResponse } from "../types/api";
 import type { AuthTokens } from "../types/auth";
+import { showToast } from "../composables/useToast";
 import {
   getAccessToken,
   getRefreshToken,
@@ -82,10 +83,7 @@ async function refreshWith(refreshToken: string, isRetry: boolean): Promise<bool
         cancelProactiveRefresh();
         // Surface the reason (e.g. "账号已在其他设备使用" after the
         // single-active-session kick) before dropping to the login screen.
-        if (json.message && typeof window !== "undefined") {
-          const { showToast } = await import("../composables/useToast");
-          showToast(json.message, "error");
-        }
+        if (json.message) showToast(json.message, "error");
         clearSession();
       }
       return false;
