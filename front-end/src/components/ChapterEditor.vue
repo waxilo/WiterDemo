@@ -37,10 +37,14 @@ const isEmpty = computed(() => !current.value?.content);
  * Load the chapter text into the contenteditable ONLY when the open chapter
  * changes. We never write the DOM back during typing, so the caret stays put.
  * (Setting innerText on every render is what makes the caret jump to the
- * start.)
+ * start.) The key is id + contentHash: a "load latest" conflict resolution
+ * replaces the current object with the same id but a different server hash,
+ * which must re-populate the editor — while saving the same content leaves
+ * the hash unchanged and never disturbs the caret.
  */
 watch(
-  () => current.value?.id,
+  () =>
+    `${current.value?.id ?? "none"}:${current.value?.contentHash ?? "null"}`,
   async () => {
     await nextTick();
     if (editorRef.value) editorRef.value.innerText = current.value?.content ?? "";

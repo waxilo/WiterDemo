@@ -9,6 +9,8 @@ export interface ChapterSummary {
   wordCount?: number;
   /** Visible character count including punctuation. */
   charCount?: number;
+  /** Optimistic-lock counter (used by the multi-device sync poller). */
+  version?: number;
 }
 
 /** Chapter detail (with content). */

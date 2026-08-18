@@ -30,6 +30,7 @@ const {
   saving,
   dirty,
   saveError,
+  remoteConflict,
   select,
   create,
   remove,
@@ -37,6 +38,10 @@ const {
   duplicate,
   reorder,
   flush,
+  startSync,
+  stopSync,
+  loadRemote,
+  overwriteRemote,
 } = props.chapters;
 
 /** Save-state indicator shown in the top bar (only when a chapter is open). */
@@ -180,11 +185,15 @@ onMounted(() => {
   relativeTimeTimer = setInterval(() => {
     now.value = Date.now();
   }, 30_000);
+  // Multi-device sync: poll the chapter list so other devices' edits become
+  // visible and remote conflicts surface as the conflict bar.
+  startSync();
 });
 
 onUnmounted(() => {
   window.removeEventListener("keydown", onEsc);
   if (relativeTimeTimer !== null) clearInterval(relativeTimeTimer);
+  stopSync();
 });
 
 function onEsc(e: KeyboardEvent) {
@@ -251,6 +260,26 @@ function onReorder(ids: number[]) {
     reorder(bookId.value, ids).catch((error: unknown) => {
       showToast(error instanceof Error ? error.message : "排序失败", "error");
     });
+  }
+}
+
+// --- remote conflict bar -----------------------------------------------------
+
+async function onLoadRemote() {
+  try {
+    await loadRemote();
+    showToast("已加载其他设备的版本", "info");
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "加载失败", "error");
+  }
+}
+
+async function onOverwriteRemote() {
+  try {
+    await overwriteRemote();
+    showToast("已保存，覆盖了其他设备的修改", "success");
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "保存失败", "error");
   }
 }
 </script>
@@ -359,6 +388,19 @@ function onReorder(ids: number[]) {
         @reorder="onReorder"
       />
       <div class="editor-column">
+        <Transition name="conflict">
+          <div v-if="remoteConflict" class="conflict-bar" role="alert">
+            <span class="conflict-text">另一设备已更新此章节</span>
+            <div class="conflict-actions">
+              <button class="conflict-btn" @click="onLoadRemote">
+                加载最新（丢弃本地修改）
+              </button>
+              <button class="conflict-btn primary" @click="onOverwriteRemote">
+                覆盖保存（保留我的内容）
+              </button>
+            </div>
+          </div>
+        </Transition>
         <ChapterEditor :chapters="chapters" />
         <footer class="writing-status">
           <div class="status-overall">
@@ -682,6 +724,74 @@ function onReorder(ids: number[]) {
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+/* ---- remote conflict bar ---- */
+.conflict-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 9px 20px;
+  background: #fdf6e3;
+  border-bottom: 1px solid rgba(196, 150, 60, 0.28);
+  font-size: 13px;
+  color: #7a5c1e;
+}
+
+.conflict-text {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+}
+
+.conflict-text::before {
+  content: "⚡";
+  font-size: 14px;
+}
+
+.conflict-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.conflict-btn {
+  padding: 5px 12px;
+  font-size: 12.5px;
+  color: #7a5c1e;
+  background: transparent;
+  border: 1px solid rgba(196, 150, 60, 0.45);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.conflict-btn:hover {
+  background: rgba(196, 150, 60, 0.12);
+}
+
+.conflict-btn.primary {
+  color: #fff;
+  background: #c4963c;
+  border-color: #c4963c;
+}
+
+.conflict-btn.primary:hover {
+  background: #b0852f;
+}
+
+.conflict-enter-active,
+.conflict-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.conflict-enter-from,
+.conflict-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 
 .writing-status {

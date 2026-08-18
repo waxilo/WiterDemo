@@ -53,6 +53,8 @@ export interface ChapterSummary {
   wordCount: number;
   /** Visible character count, including punctuation. */
   charCount: number;
+  /** Optimistic-lock counter; lets clients detect remote edits via the list. */
+  version: number;
 }
 
 /** Chapter detail (with content). */

@@ -41,6 +41,7 @@ function toSummary(row: ChapterRow): ChapterSummary {
     updateTime: row.update_time,
     wordCount: row.word_count ?? 0,
     charCount: row.char_count ?? 0,
+    version: row.version,
   };
 }
 
@@ -81,7 +82,7 @@ export async function listChapters(
   if (!book) throw new ApiError(403, "无权操作");
 
   const { results } = await env.DB.prepare(
-    `select id, book_id, title, sort_order, update_time, word_count, char_count
+    `select id, book_id, title, sort_order, update_time, word_count, char_count, version
      from t_chapter where book_id = ? order by sort_order asc, id asc`
   )
     .bind(bookId)
