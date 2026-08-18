@@ -37,17 +37,24 @@ const isEmpty = computed(() => !current.value?.content);
  * Load the chapter text into the contenteditable ONLY when the open chapter
  * changes. We never write the DOM back during typing, so the caret stays put.
  * (Setting innerText on every render is what makes the caret jump to the
- * start.) The key is id + contentHash: a "load latest" conflict resolution
- * replaces the current object with the same id but a different server hash,
- * which must re-populate the editor — while saving the same content leaves
- * the hash unchanged and never disturbs the caret.
+ * start.)
+ *
+ * The key is deliberately just the chapter id — NOT content/contentHash:
+ * a successful autosave updates contentHash to the server's SHA-256 of the
+ * NEW content, and if the key included it, every save would re-set
+ * innerText and snap the caret back to the first line. As a second line of
+ * defence, we skip the write whenever the rendered text already matches the
+ * model (a no-op innerText assignment is what kills the caret).
  */
 watch(
-  () =>
-    `${current.value?.id ?? "none"}:${current.value?.contentHash ?? "null"}`,
+  () => current.value?.id,
   async () => {
     await nextTick();
-    if (editorRef.value) editorRef.value.innerText = current.value?.content ?? "";
+    if (!editorRef.value) return;
+    const next = current.value?.content ?? "";
+    if (editorRef.value.innerText !== next) {
+      editorRef.value.innerText = next;
+    }
   },
   { immediate: true }
 );
