@@ -244,3 +244,120 @@ export async function deleteChapter(
     .run();
   return { id: chapterId };
 }
+
+// --- book-wide find & replace ------------------------------------------------
+
+export interface ChapterMatch {
+  id: number;
+  title: string;
+  count: number;
+}
+
+export interface SearchResult {
+  /** Total matches across the whole book. */
+  totalMatches: number;
+  /** Per-chapter match counts (only chapters with at least one match). */
+  chapters: ChapterMatch[];
+}
+
+export interface ReplaceResult {
+  totalReplaced: number;
+  chapters: { id: number; title: string; replaced: number }[];
+}
+
+/** Count case-insensitive literal occurrences of `query` in `content`. */
+function countMatches(content: string, query: string): number {
+  const lower = content.toLowerCase();
+  const q = query.toLowerCase();
+  if (q === "") return 0;
+  let count = 0;
+  let index = lower.indexOf(q);
+  while (index !== -1) {
+    count++;
+    index = lower.indexOf(q, index + q.length);
+  }
+  return count;
+}
+
+/**
+ * Book-wide search: counts matches per chapter WITHOUT transferring full
+ * content to the client (statistics only; case-insensitive literal match).
+ */
+export async function searchChapters(
+  env: Env,
+  userId: number,
+  bookId: number,
+  query: string
+): Promise<SearchResult> {
+  const book = await getOwnedBook(env, userId, bookId);
+  if (!book) throw new ApiError(403, "无权操作");
+
+  const { results } = await env.DB.prepare(
+    `select id, title, content from t_chapter where book_id = ?`
+  )
+    .bind(bookId)
+    .all<{ id: number; title: string; content: string }>();
+
+  let totalMatches = 0;
+  const chapters: ChapterMatch[] = [];
+  for (const row of results) {
+    const count = countMatches(row.content, query);
+    if (count > 0) {
+      totalMatches += count;
+      chapters.push({ id: row.id, title: row.title, count });
+    }
+  }
+  return { totalMatches, chapters };
+}
+
+/**
+ * Book-wide replace of a literal string across all chapters. Replacement is
+ * case-sensitive and applied to the whole word occurrences; stats and
+ * content hashes are recomputed and version bumped exactly like a normal
+ * save. The version condition makes concurrent writes fail-safe (a mismatch
+ * simply skips that chapter — single-session policy makes this unlikely).
+ */
+export async function replaceAllChapters(
+  env: Env,
+  userId: number,
+  bookId: number,
+  from: string,
+  to: string
+): Promise<ReplaceResult> {
+  const book = await getOwnedBook(env, userId, bookId);
+  if (!book) throw new ApiError(403, "无权操作");
+
+  const { results } = await env.DB.prepare(
+    `select id, title, content, version from t_chapter where book_id = ?`
+  )
+    .bind(bookId)
+    .all<{ id: number; title: string; content: string; version: number }>();
+
+  let totalReplaced = 0;
+  const chapters: ReplaceResult["chapters"] = [];
+  for (const row of results) {
+    if (!row.content.includes(from)) continue;
+    const nextContent = row.content.split(from).join(to);
+    const replaced = countMatches(row.content, from);
+    const stats = getContentStats(nextContent);
+    const contentHash = await sha256Hex(nextContent);
+    await env.DB.prepare(
+      `update t_chapter
+       set content = ?, content_hash = ?, word_count = ?, char_count = ?,
+           version = version + 1, update_time = CURRENT_TIMESTAMP
+       where id = ? and version = ?`
+    )
+      .bind(
+        nextContent,
+        contentHash,
+        stats.wordCount,
+        stats.charCount,
+        row.id,
+        row.version
+      )
+      .run();
+    totalReplaced += replaced;
+    chapters.push({ id: row.id, title: row.title, replaced });
+  }
+  return { totalReplaced, chapters };
+}

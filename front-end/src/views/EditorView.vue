@@ -4,6 +4,7 @@ import type { useBooks } from "../composables/useBooks";
 import type { useChapters } from "../composables/useChapters";
 import ChapterList from "../components/ChapterList.vue";
 import ChapterEditor from "../components/ChapterEditor.vue";
+import FindReplacePanel from "../components/FindReplacePanel.vue";
 import { useConfirm } from "../composables/useConfirm";
 import { showToast } from "../composables/useToast";
 import { formatCount, getTextStats } from "../utils/textStats";
@@ -173,22 +174,65 @@ function onLogout() {
   emit("logout");
 }
 
+// --- find & replace ----------------------------------------------------------
+const findOpen = ref(false);
+const editorRef = ref<InstanceType<typeof ChapterEditor> | null>(null);
+const findPanelRef = ref<InstanceType<typeof FindReplacePanel> | null>(null);
+
+function openFindPanel() {
+  findOpen.value = true;
+  findPanelRef.value?.focusQuery();
+}
+
+/** 面板替换本章后：编辑器 DOM 与模型已不同步，强制重载。 */
+function onReloadEditor() {
+  editorRef.value?.reloadFromModel();
+}
+
+/** 面板在编辑器内定位关键字。 */
+function onLocate(keyword: string) {
+  editorRef.value?.locate(keyword);
+}
+
+/** 面板点击全书结果：切换章节并在内容加载后定位。 */
+async function onOpenAndLocate(chapterId: number, keyword: string) {
+  try {
+    await props.chapters.select(chapterId);
+    await nextTick();
+    // 章节内容写入 DOM 在 Vue 更新链之后，用宏任务确保 innerText 已就绪。
+    setTimeout(() => {
+      editorRef.value?.locate(keyword);
+    }, 0);
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "切换章节失败", "error");
+  }
+}
+
 // --- navigation --------------------------------------------------------------
 onMounted(() => {
   if (bookId.value !== null) void props.chapters.loadList(bookId.value);
-  window.addEventListener("keydown", onEsc);
+  window.addEventListener("keydown", onGlobalKeydown);
   relativeTimeTimer = setInterval(() => {
     now.value = Date.now();
   }, 30_000);
 });
 
 onUnmounted(() => {
-  window.removeEventListener("keydown", onEsc);
+  window.removeEventListener("keydown", onGlobalKeydown);
   if (relativeTimeTimer !== null) clearInterval(relativeTimeTimer);
 });
 
-function onEsc(e: KeyboardEvent) {
-  if (e.key === "Escape") closeMenu();
+function onGlobalKeydown(e: KeyboardEvent) {
+  // Ctrl/Cmd+F: open the find panel instead of the webview's native find.
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+    e.preventDefault();
+    openFindPanel();
+    return;
+  }
+  if (e.key === "Escape") {
+    if (findOpen.value) findOpen.value = false;
+    else closeMenu();
+  }
 }
 
 async function onBack() {
@@ -359,7 +403,16 @@ function onReorder(ids: number[]) {
         @reorder="onReorder"
       />
       <div class="editor-column">
-        <ChapterEditor :chapters="chapters" />
+        <FindReplacePanel
+          v-if="findOpen && bookId !== null"
+          ref="findPanelRef"
+          :book-id="bookId"
+          :chapters="chapters"
+          @reload-editor="onReloadEditor"
+          @locate="onLocate"
+          @open-and-locate="onOpenAndLocate"
+        />
+        <ChapterEditor ref="editorRef" :chapters="chapters" />
         <footer class="writing-status">
           <div class="status-overall">
             全书 {{ list.length }} 章 ·

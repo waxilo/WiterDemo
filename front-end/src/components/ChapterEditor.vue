@@ -96,6 +96,42 @@ function readEditorText(el: HTMLElement): string {
   return serializeNode(el);
 }
 
+// --- methods exposed to the parent (find/replace panel) ----------------------
+
+/** Re-populate the editor from the model (after an in-place content rewrite). */
+function reloadFromModel(): void {
+  if (editorRef.value) editorRef.value.innerText = current.value?.content ?? "";
+}
+
+/**
+ * Select the first literal occurrence of `keyword` in the editor DOM
+ * (case-sensitive, matching the replace semantics). Returns false when not
+ * found; scrolls the match into view.
+ */
+function locate(keyword: string): boolean {
+  const el = editorRef.value;
+  if (!el || !keyword) return false;
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  let node: Text | null;
+  while ((node = walker.nextNode() as Text | null)) {
+    const index = node.data.indexOf(keyword);
+    if (index !== -1) {
+      const range = document.createRange();
+      range.setStart(node, index);
+      range.setEnd(node, index + keyword.length);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      // Ensure the match is visible in the scrollport.
+      range.startContainer.parentElement?.scrollIntoView({ block: "center" });
+      return true;
+    }
+  }
+  return false;
+}
+
+defineExpose({ reloadFromModel, locate });
+
 function onInput(e: Event) {
   if (!current.value) return;
   current.value.content = readEditorText(e.target as HTMLElement);

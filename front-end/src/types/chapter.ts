@@ -22,6 +22,25 @@ export interface Chapter extends ChapterSummary {
   version: number;
 }
 
+/** One chapter's match count for a book-wide search. */
+export interface ChapterMatch {
+  id: number;
+  title: string;
+  count: number;
+}
+
+/** Result of a book-wide keyword search. */
+export interface SearchResult {
+  totalMatches: number;
+  chapters: ChapterMatch[];
+}
+
+/** Result of a book-wide keyword replace. */
+export interface ReplaceResult {
+  totalReplaced: number;
+  chapters: { id: number; title: string; replaced: number }[];
+}
+
 /**
  * Payload for saving a chapter. `baseVersion` is the version the client
  * loaded; the server conditions the write on it and refuses (409) if it no

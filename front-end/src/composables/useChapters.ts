@@ -214,6 +214,18 @@ export function useChapters() {
   }
 
   /**
+   * Adopt a freshly fetched server version of the open chapter (e.g. after a
+   * book-wide replace touched it): replaces the object and re-bases the save
+   * marker so the editor shows the new content without a false "dirty" state.
+   */
+  function applyServerChapter(chapter: Chapter): void {
+    if (current.value?.id !== chapter.id) return;
+    current.value = chapter;
+    savedHash.value = hashOf(chapter.title, chapter.content);
+    saveError.value = null;
+  }
+
+  /**
    * Synchronous best-effort flush for page unload (window/app close), where
    * async requests are not guaranteed to complete.
    */
@@ -330,6 +342,7 @@ export function useChapters() {
     flush,
     flushSync,
     reset,
+    applyServerChapter,
     remove,
     rename,
     duplicate,

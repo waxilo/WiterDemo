@@ -57,13 +57,25 @@ export async function router(ctx: Ctx): Promise<Response> {
     bookId !== undefined &&
     ID_SEGMENT.test(bookId) &&
     seg(2) === "chapters";
+  const isBookSearch =
+    segments.length === 3 &&
+    seg(0) === "books" &&
+    bookId !== undefined &&
+    ID_SEGMENT.test(bookId) &&
+    seg(2) === "search";
+  const isBookReplace =
+    segments.length === 3 &&
+    seg(0) === "books" &&
+    bookId !== undefined &&
+    ID_SEGMENT.test(bookId) &&
+    seg(2) === "replace";
   const isChapterId =
     segments.length === 2 &&
     seg(0) === "chapters" &&
     chapterId !== undefined &&
     ID_SEGMENT.test(chapterId);
 
-  if (!isMe && !isBooks && !isBookId && !isBookChapters && !isChapterId) {
+  if (!isMe && !isBooks && !isBookId && !isBookChapters && !isBookSearch && !isBookReplace && !isChapterId) {
     return jsonResponse(null, 404, "Not Found API");
   }
 
@@ -140,6 +152,18 @@ export async function router(ctx: Ctx): Promise<Response> {
     if (method === "GET") return chapterController.listChapters(ctx);
     if (method === "POST") return afterWrite(chapterController.createChapter(ctx));
     if (method === "PUT") return afterWrite(chapterController.reorderChapters(ctx));
+    return jsonResponse(null, 404, "Not Found API");
+  }
+
+  // /books/:bookId/search (read) and /books/:bookId/replace (write)
+  if ((isBookSearch || isBookReplace) && bookId !== undefined) {
+    ctx.params.bookId = bookId;
+    if (isBookSearch && method === "GET") {
+      return chapterController.searchChapters(ctx);
+    }
+    if (isBookReplace && method === "POST") {
+      return afterWrite(chapterController.replaceAllChapters(ctx));
+    }
     return jsonResponse(null, 404, "Not Found API");
   }
 

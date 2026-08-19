@@ -111,3 +111,38 @@ export async function deleteChapter(ctx: Ctx): Promise<Response> {
   );
   return jsonResponse(result);
 }
+
+/** Book-wide keyword search (match counts per chapter). */
+export async function searchChapters(ctx: Ctx): Promise<Response> {
+  const query = assertString(
+    ctx.url.searchParams.get("q") ?? "",
+    "关键字",
+    200,
+    1
+  );
+  const result = await chapterService.searchChapters(
+    ctx.env,
+    ctx.userId,
+    assertId(ctx.params.bookId, "书籍 id"),
+    query
+  );
+  return jsonResponse(result);
+}
+
+interface ReplaceBody {
+  from: string;
+  to?: string;
+}
+
+/** Book-wide keyword replace. */
+export async function replaceAllChapters(ctx: Ctx): Promise<Response> {
+  const body = await ctx.json<ReplaceBody>();
+  const result = await chapterService.replaceAllChapters(
+    ctx.env,
+    ctx.userId,
+    assertId(ctx.params.bookId, "书籍 id"),
+    assertString(body.from, "查找关键字", 200, 1),
+    assertString(body.to ?? "", "替换内容", 200)
+  );
+  return jsonResponse(result);
+}

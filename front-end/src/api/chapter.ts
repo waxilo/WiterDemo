@@ -1,5 +1,11 @@
 import { request } from "./http";
-import type { Chapter, ChapterSummary, SaveChapterPayload } from "../types/chapter";
+import type {
+  Chapter,
+  ChapterSummary,
+  SaveChapterPayload,
+  SearchResult,
+  ReplaceResult,
+} from "../types/chapter";
 
 /** List chapters of a book (no content). */
 export function listChapters(bookId: number): Promise<ChapterSummary[]> {
@@ -42,5 +48,28 @@ export function reorderChapters(
   return request<ChapterSummary[]>(`/books/${bookId}/chapters`, {
     method: "PUT",
     body: { ids },
+  });
+}
+
+/** Book-wide keyword search: match counts per chapter (no content transfer). */
+export function searchChapters(
+  bookId: number,
+  query: string
+): Promise<SearchResult> {
+  return request<SearchResult>(
+    `/books/${bookId}/search?q=${encodeURIComponent(query)}`,
+    { method: "GET" }
+  );
+}
+
+/** Book-wide literal replace across all chapters (server-side, one round-trip). */
+export function replaceAllChapters(
+  bookId: number,
+  from: string,
+  to: string
+): Promise<ReplaceResult> {
+  return request<ReplaceResult>(`/books/${bookId}/replace`, {
+    method: "POST",
+    body: { from, to },
   });
 }
