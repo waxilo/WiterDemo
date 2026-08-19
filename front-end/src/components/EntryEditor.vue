@@ -6,6 +6,7 @@ import { ENTRY_TYPE_LABELS } from "../types/writer";
 import { useConfirm } from "../composables/useConfirm";
 import { showToast } from "../composables/useToast";
 import { useBusy } from "../composables/useBusy";
+import { AUTOSAVE_IDLE_MS } from "../config";
 import LoadingIndicator from "./LoadingIndicator.vue";
 
 /**
@@ -35,7 +36,87 @@ let saveSeq = 0;
 let removing = false;
 /** 串行化：同一时间只有一个保存请求在途，避免并发写乱序覆盖服务器值。 */
 let persistInFlight = false;
-let persistQueued = false;
+/**
+ * 排队中的保存（固定快照，续存不依赖 entry.value——切条目后它会被置 null，
+ * 否则挂起修改会丢失）。按条目 id 去重，不同条目各自排队。
+ */
+let queuedSaves: Array<{ id: number; title: string; content: string }> = [];
+
+function queueSave(id: number, title: string, content: string): void {
+  const item = { id, title, content };
+  const idx = queuedSaves.findIndex((q) => q.id === id);
+  if (idx >= 0) queuedSaves[idx] = item;
+  else queuedSaves.push(item);
+}
+
+/** 用户输入后的防抖保存入口。 */
+async function persist(): Promise<void> {
+  const current = entry.value;
+  if (!current) return;
+  await saveSnapshot(current.id, current.title, current.content);
+}
+
+/**
+ * 保存指定条目（串行化）。排队时固定快照，切条目/卸载后仍能落盘。
+ */
+async function saveSnapshot(
+  id: number,
+  title: string,
+  content: string
+): Promise<void> {
+  if (persistInFlight) {
+    queueSave(id, title, content);
+    return;
+  }
+  persistInFlight = true;
+  saveTimer = null;
+  // 仅当前条目才更新保存状态：切条目后的续存不应影响当前显示。
+  if (entry.value && entry.value.id === id) saveState.value = "saving";
+  // 发送快照：响应返回时仅当用户未继续修改才写回服务器回显，
+  // 防止慢请求把正在输入的内容回滚成旧值。
+  const snapshot = { title, content };
+  const seq = ++saveSeq;
+  try {
+    const saved = await writerApi.updateEntry(id, { title, content });
+    // 已有更新的保存请求：旧响应不得覆盖新响应的状态/内容。
+    if (seq !== saveSeq) return;
+    // 守卫 id：切换条目后旧保存响应不得覆盖新条目。
+    if (entry.value && entry.value.id === id) {
+      if (
+        entry.value.title === snapshot.title &&
+        entry.value.content === snapshot.content
+      ) {
+        // 用户未继续修改：同步服务器回显（trim 等规范化）+ 标记已保存。
+        entry.value.title = saved.title;
+        entry.value.content = saved.content;
+        saveState.value = "saved";
+        emit("saved", saved);
+      } else {
+        // 用户已继续输入：不覆盖，保持待保存；队列会再次保存新内容。
+        saveState.value = "dirty";
+        // 通知父级时带上最新本地值，避免列表标题被慢响应回退成旧值。
+        emit("saved", { ...saved, title: entry.value.title, content: entry.value.content });
+      }
+    } else {
+      // 已切换到其他条目：仅同步列表项。
+      emit("saved", saved);
+    }
+  } catch (error) {
+    // 删除进行中：条目已不存在，404 属预期，不打扰用户。
+    if (removing) return;
+    if (seq !== saveSeq) return;
+    if (entry.value && entry.value.id === id) {
+      saveState.value = "dirty";
+    }
+    showToast(error instanceof Error ? error.message : "保存失败", "error");
+  } finally {
+    persistInFlight = false;
+    const next = queuedSaves.shift();
+    if (next) {
+      void saveSnapshot(next.id, next.title, next.content); // 续存排队期间的最新修改
+    }
+  }
+}
 
 async function loadEntry(id: number): Promise<void> {
   const seq = ++loadSeq;
@@ -81,65 +162,7 @@ function onUserInput(e: Event): void {
   if (saveTimer !== null) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     void persist();
-  }, 800);
-}
-
-async function persist(): Promise<void> {
-  const current = entry.value;
-  if (!current) return;
-  if (persistInFlight) {
-    // 已有保存在途：标记排队，完成后由 finally 续存最新内容
-    // （并发写可能乱序到达服务器，旧值会覆盖新值）。
-    persistQueued = true;
-    return;
-  }
-  saveTimer = null;
-  persistInFlight = true;
-  saveState.value = "saving";
-  // 发送快照：响应返回时仅当用户未继续修改才写回服务器回显，
-  // 防止慢请求把正在输入的内容回滚成旧值。
-  const snapshot = { title: current.title, content: current.content };
-  const seq = ++saveSeq;
-  try {
-    const saved = await writerApi.updateEntry(current.id, {
-      title: current.title,
-      content: current.content,
-    });
-    // 已有更新的保存请求：旧响应不得覆盖新响应的状态/内容。
-    if (seq !== saveSeq) return;
-    // 守卫 id：切换条目后旧保存响应不得覆盖新条目。
-    if (entry.value && entry.value.id === current.id) {
-      if (
-        entry.value.title === snapshot.title &&
-        entry.value.content === snapshot.content
-      ) {
-        // 用户未继续修改：同步服务器回显（trim 等规范化）+ 标记已保存。
-        entry.value.title = saved.title;
-        entry.value.content = saved.content;
-        saveState.value = "saved";
-        emit("saved", saved);
-      } else {
-        // 用户已继续输入：不覆盖，保持待保存；队列会再次保存新内容。
-        saveState.value = "dirty";
-        // 通知父级时带上最新本地值，避免列表标题被慢响应回退成旧值。
-        emit("saved", { ...saved, title: entry.value.title, content: entry.value.content });
-      }
-    }
-  } catch (error) {
-    // 删除进行中：条目已不存在，404 属预期，不打扰用户。
-    if (removing) return;
-    if (seq !== saveSeq) return;
-    if (entry.value && entry.value.id === current.id) {
-      saveState.value = "dirty";
-    }
-    showToast(error instanceof Error ? error.message : "保存失败", "error");
-  } finally {
-    persistInFlight = false;
-    if (persistQueued) {
-      persistQueued = false;
-      void persist(); // 续存排队期间的最新修改
-    }
-  }
+  }, AUTOSAVE_IDLE_MS);
 }
 
 /** 完成：先落盘未保存修改，再通知关闭。 */
@@ -171,6 +194,8 @@ async function onRemove(): Promise<void> {
     emit("deleted");
     emit("close");
   }).catch((error) => {
+    // 删除失败：恢复 removing，之后的保存失败仍需正常提示。
+    removing = false;
     showToast(error instanceof Error ? error.message : "删除失败", "error");
   });
 }

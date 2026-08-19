@@ -19,6 +19,8 @@ type Filter = EntryType;
 const filter = ref<Filter>("character");
 const entries = ref<Entry[]>([]);
 const loading = ref(false);
+/** 加载序号：丢弃过期响应（快速切 tab 时旧响应不得覆盖新列表）。 */
+let listSeq = 0;
 const editingId = ref<number | null>(null);
 /** 全屏铺开模式（覆盖整个屏幕）。 */
 const expanded = ref(false);
@@ -36,13 +38,17 @@ onMounted(() => {
 onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 
 async function loadList(): Promise<void> {
+  const seq = ++listSeq;
   loading.value = true;
   try {
-    entries.value = await writerApi.listEntries(props.bookId, filter.value);
+    const res = await writerApi.listEntries(props.bookId, filter.value);
+    if (seq !== listSeq) return; // 已有更新的加载：丢弃过期响应
+    entries.value = res;
   } catch (error) {
+    if (seq !== listSeq) return;
     showToast(error instanceof Error ? error.message : "加载设定失败", "error");
   } finally {
-    loading.value = false;
+    if (seq === listSeq) loading.value = false;
   }
 }
 
