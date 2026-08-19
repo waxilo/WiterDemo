@@ -112,24 +112,6 @@ const emit = defineEmits<{
   color: #8a8577;
 }
 
-.settings-add {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  color: #8a8577;
-  background: transparent;
-  border: none;
-  border-radius: 7px;
-  cursor: pointer;
-}
-
-.settings-add:hover {
-  background: #f0eee7;
-  color: #444;
-}
-
 .settings-loading {
   padding: 18px 14px;
   display: flex;

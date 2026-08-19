@@ -86,6 +86,12 @@ function closeExpanded(): void {
   expanded.value = false;
   editingId.value = null;
 }
+
+/** 供父级（EditorView 头部的全屏按钮）调用。 */
+function expand(): void {
+  expanded.value = true;
+}
+defineExpose({ expand });
 </script>
 
 <template>
@@ -115,23 +121,6 @@ function closeExpanded(): void {
                 stroke="currentColor"
                 stroke-width="2"
                 stroke-linecap="round"
-              />
-            </svg>
-          </button>
-          <button
-            class="settings-add"
-            title="全屏展开"
-            aria-label="全屏展开"
-            @click="expanded = true"
-          >
-            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
-              <path
-                d="M4 9V5a1 1 0 0 1 1-1h4M20 9V5a1 1 0 0 0-1-1h-4M4 15v4a1 1 0 0 0 1 1h4M20 15v4a1 1 0 0 1-1 1h-4"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
               />
             </svg>
           </button>
@@ -197,6 +186,30 @@ function closeExpanded(): void {
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+
+/* 窄面板头部动作按钮（slot 内容由本组件渲染，样式须在此声明） */
+.settings-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  color: #8a8577;
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.settings-add:hover {
+  background: #f0eee7;
+  color: #444;
+}
+
+.settings-add:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* ---- 全屏铺开模式 ---- */

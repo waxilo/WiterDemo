@@ -231,6 +231,8 @@ async function onHistoryRestored(): Promise<void> {
 // --- outline (left tab) + settings (right column) ---------------------------
 const SETTINGS_KEY = "writer_settings_collapsed";
 const settingsCollapsed = ref(localStorage.getItem(SETTINGS_KEY) === "1");
+/** 右侧设定面板实例（头部全屏按钮调用其 expand()）。 */
+const settingsPanelRef = ref<InstanceType<typeof SettingsPanel> | null>(null);
 const outlineActiveIndex = ref(-1);
 let outlineScrollTimer: ReturnType<typeof setTimeout> | null = null;
 let outlineScrollEl: HTMLElement | null = null;
@@ -617,25 +619,46 @@ function onReorder(ids: number[]) {
           <span v-if="!settingsCollapsed" class="settings-column-title"
             >设定</span
           >
-          <button
-            class="settings-toggle"
-            :title="settingsCollapsed ? '展开设定资料库' : '收起设定资料库'"
-            :aria-label="settingsCollapsed ? '展开设定资料库' : '收起设定资料库'"
-            @click="toggleSettings"
-          >
-          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-            <path
-              d="M15 18l-6-6 6-6"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-          </svg>
-          </button>
+          <div class="settings-column-actions">
+            <button
+              v-if="!settingsCollapsed"
+              class="settings-toggle"
+              title="全屏展开设定资料库"
+              aria-label="全屏展开设定资料库"
+              @click="settingsPanelRef?.expand()"
+            >
+              <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+                <path
+                  d="M4 9V5a1 1 0 0 1 1-1h4M20 9V5a1 1 0 0 0-1-1h-4M4 15v4a1 1 0 0 0 1 1h4M20 15v4a1 1 0 0 1-1 1h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
+            <button
+              class="settings-toggle"
+              :title="settingsCollapsed ? '展开设定资料库' : '收起设定资料库'"
+              :aria-label="settingsCollapsed ? '展开设定资料库' : '收起设定资料库'"
+              @click="toggleSettings"
+            >
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <path
+                  d="M15 18l-6-6 6-6"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
+          </div>
         </div>
         <SettingsPanel
+          ref="settingsPanelRef"
           v-if="!settingsCollapsed && bookId !== null"
           :book-id="bookId"
         />
@@ -1030,6 +1053,12 @@ function onReorder(ids: number[]) {
 .settings-column.collapsed .settings-column-head {
   justify-content: center;
   padding: 0;
+}
+
+.settings-column-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
 .settings-column-title {
