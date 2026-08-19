@@ -147,18 +147,16 @@ export async function router(ctx: Ctx): Promise<Response> {
   ctx.userSid = auth.sid;
 
   /**
-   * Single-active-session policy. Two layers:
+   * Multi-session policy (no kicking): web, MCP, and other clients hold
+   * independent sessions and may be online simultaneously. Concurrency is
+   * handled by optimistic locking (version + 409) on chapters and entries,
+   * not by revoking other sessions.
    *
-   * 1. PRE-CHECK (below): a write whose session was already revoked (kicked
-   *    by another device, or rotated away by its own token refresh) is
-   *    rejected with 401 BEFORE touching data. This also protects against the
-   *    stale-AT race: an in-flight request using a pre-refresh access token
-   *    (sid = old session) cannot accidentally kick the fresh session.
-   * 2. POST-WRITE (afterWrite): after any successful write, every OTHER
-   *    session of the account is revoked.
+   * The only write-time check below is PRE-CHECK: a write whose session was
+   * already revoked (logged out, rotated away by its own refresh, or the
+   * account password changed) is rejected with 401 BEFORE touching data.
    */
   const isWrite = method === "POST" || method === "PUT" || method === "DELETE";
-  let isMcpSession = false;
   if (isWrite && ctx.userSid !== undefined) {
     const mine = await sessionService.findSession(
       ctx.env,
@@ -166,28 +164,13 @@ export async function router(ctx: Ctx): Promise<Response> {
       ctx.userSid
     );
     if (!mine || mine.revoked === 1) {
-      return jsonResponse(null, 401, "账号已在其他设备使用，请重新登录");
+      return jsonResponse(null, 401, "登录状态已失效，请重新登录");
     }
-    // AI 工具会话：写操作不触发抢占（MCP 与网页端隔离，乐观锁兜底并发）。
-    isMcpSession = mine.is_mcp === 1;
   }
 
-  /** Kick all other NON-MCP sessions after a successful write; never fails the request. */
-  const afterWrite = async (res: Promise<Response> | Response): Promise<Response> => {
-    const response = await res;
-    if (
-      response.status < 400 &&
-      response.status !== 204 &&
-      ctx.userSid !== undefined &&
-      !isMcpSession
-    ) {
-      // Best effort: a failed kick must not turn a successful write into 500.
-      await sessionService
-        .revokeAllExcept(ctx.env, ctx.userId, ctx.userSid)
-        .catch(() => undefined);
-    }
-    return response;
-  };
+  /** Transparent wrapper kept for write routes (no side effects anymore). */
+  const afterWrite = async (res: Promise<Response> | Response): Promise<Response> =>
+    res;
 
   // /me — current user info; /me/password — change password
   if (isMe || isMePassword) {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onBeforeUnmount, computed } from "vue";
 import * as writerApi from "../api/writer";
+import { ApiClientError } from "../api/http";
 import type { Entry, EntryType } from "../types/writer";
 import { ENTRY_TYPE_LABELS } from "../types/writer";
 import { useConfirm } from "../composables/useConfirm";
@@ -34,67 +35,101 @@ let loadSeq = 0;
 let saveSeq = 0;
 /** 删除进行中：在途保存的 404 属预期，不再弹错误。 */
 let removing = false;
+/** 409 自动合并重试上限：连续冲突超过则采用服务器内容，避免对方持续写入时死循环。 */
+const MAX_MERGE_RETRIES = 3;
+let mergeRetries = 0;
 /** 串行化：同一时间只有一个保存请求在途，避免并发写乱序覆盖服务器值。 */
 let persistInFlight = false;
+/** 服务器一致基线：上次加载/保存成功后的值（用于 409 对比与字段级保存）。 */
+let baseTitle = "";
+let baseContent = "";
+/** 用户实际修改过的字段：保存只发送这些字段，避免覆盖其他设备的写入。 */
+let dirtyFields = new Set<"title" | "content">();
+
+type DirtyPatch = { title?: string; content?: string };
+
 /**
  * 排队中的保存（固定快照，续存不依赖 entry.value——切条目后它会被置 null，
  * 否则挂起修改会丢失）。按条目 id 去重，不同条目各自排队。
  */
-let queuedSaves: Array<{ id: number; title: string; content: string }> = [];
+let queuedSaves: Array<{
+  id: number;
+  patch: DirtyPatch;
+  version: number;
+  fields: ReadonlySet<"title" | "content">;
+}> = [];
 
-function queueSave(id: number, title: string, content: string): void {
-  const item = { id, title, content };
+function queueSave(
+  id: number,
+  patch: DirtyPatch,
+  version: number,
+  fields: ReadonlySet<"title" | "content">
+): void {
+  const item = { id, patch, version, fields };
   const idx = queuedSaves.findIndex((q) => q.id === id);
   if (idx >= 0) queuedSaves[idx] = item;
   else queuedSaves.push(item);
 }
 
-/** 用户输入后的防抖保存入口。 */
+/** 用户输入后的防抖保存入口（只保存脏字段）。 */
 async function persist(): Promise<void> {
   const current = entry.value;
-  if (!current) return;
-  await saveSnapshot(current.id, current.title, current.content);
+  if (!current || dirtyFields.size === 0) return;
+  const patch: DirtyPatch = {};
+  if (dirtyFields.has("title")) patch.title = current.title;
+  if (dirtyFields.has("content")) patch.content = current.content;
+  await saveSnapshot(current.id, patch, current.version, new Set(dirtyFields));
 }
 
 /**
- * 保存指定条目（串行化）。排队时固定快照，切条目/卸载后仍能落盘。
+ * 保存指定条目（串行化 + 字段级）。排队时固定快照，切条目/卸载后仍能落盘。
+ * 409（服务器被其他设备改写）：对比基线自动合并——对方只改了非脏字段则保留双方；
+ * 改了脏字段（真冲突）则采用服务器内容，不覆盖对方的写入。
  */
 async function saveSnapshot(
   id: number,
-  title: string,
-  content: string
+  patch: DirtyPatch,
+  version: number,
+  fields: ReadonlySet<"title" | "content">
 ): Promise<void> {
   if (persistInFlight) {
-    queueSave(id, title, content);
+    queueSave(id, patch, version, fields);
     return;
   }
   persistInFlight = true;
   saveTimer = null;
   // 仅当前条目才更新保存状态：切条目后的续存不应影响当前显示。
   if (entry.value && entry.value.id === id) saveState.value = "saving";
-  // 发送快照：响应返回时仅当用户未继续修改才写回服务器回显，
-  // 防止慢请求把正在输入的内容回滚成旧值。
-  const snapshot = { title, content };
   const seq = ++saveSeq;
   try {
-    const saved = await writerApi.updateEntry(id, { title, content });
+    const saved = await writerApi.updateEntry(id, {
+      title: fields.has("title") ? patch.title : undefined,
+      content: fields.has("content") ? patch.content : undefined,
+      baseVersion: version,
+    });
     // 已有更新的保存请求：旧响应不得覆盖新响应的状态/内容。
     if (seq !== saveSeq) return;
     // 守卫 id：切换条目后旧保存响应不得覆盖新条目。
     if (entry.value && entry.value.id === id) {
-      if (
-        entry.value.title === snapshot.title &&
-        entry.value.content === snapshot.content
-      ) {
-        // 用户未继续修改：同步服务器回显（trim 等规范化）+ 标记已保存。
+      mergeRetries = 0;
+      baseTitle = saved.title;
+      baseContent = saved.content;
+      entry.value.version = saved.version;
+      // 保存的字段若用户已继续修改 → 保持脏；否则清脏并写回规范化回显。
+      const stillDirty = new Set<"title" | "content">();
+      if (fields.has("title") && entry.value.title !== patch.title) stillDirty.add("title");
+      if (fields.has("content") && entry.value.content !== patch.content) stillDirty.add("content");
+      dirtyFields = stillDirty;
+      if (stillDirty.size === 0) {
         entry.value.title = saved.title;
         entry.value.content = saved.content;
         saveState.value = "saved";
         emit("saved", saved);
       } else {
-        // 用户已继续输入：不覆盖，保持待保存；队列会再次保存新内容。
         saveState.value = "dirty";
-        // 通知父级时带上最新本地值，避免列表标题被慢响应回退成旧值。
+        // 写回已保存字段的规范化值（未继续修改的部分）。
+        if (fields.has("title") && !stillDirty.has("title")) entry.value.title = saved.title;
+        if (fields.has("content") && !stillDirty.has("content")) entry.value.content = saved.content;
         emit("saved", { ...saved, title: entry.value.title, content: entry.value.content });
       }
     } else {
@@ -105,6 +140,56 @@ async function saveSnapshot(
     // 删除进行中：条目已不存在，404 属预期，不打扰用户。
     if (removing) return;
     if (seq !== saveSeq) return;
+    if (
+      error instanceof ApiClientError &&
+      error.code === 409 &&
+      entry.value &&
+      entry.value.id === id
+    ) {
+      const data = error.data as { entry?: Entry } | undefined;
+      if (data?.entry) {
+        const server = data.entry;
+        // 服务器相对我们基线的变更字段。
+        const serverChanged = {
+          title: server.title !== baseTitle,
+          content: server.content !== baseContent,
+        };
+        const titleConflict = dirtyFields.has("title") && serverChanged.title;
+        const contentConflict = dirtyFields.has("content") && serverChanged.content;
+        if (
+          !titleConflict &&
+          !contentConflict &&
+          mergeRetries < MAX_MERGE_RETRIES
+        ) {
+          // 无真冲突：自动合并——服务器值做新基线，本地脏字段保留，重试保存。
+          // 连续冲突超过上限则视为对方持续写入，停止重试（避免死循环）。
+          mergeRetries++;
+          entry.value = {
+            ...server,
+            title: dirtyFields.has("title") ? entry.value.title : server.title,
+            content: dirtyFields.has("content") ? entry.value.content : server.content,
+          };
+          baseTitle = server.title;
+          baseContent = server.content;
+          saveState.value = "dirty";
+          emit("saved", entry.value);
+          void persist(); // 在途标志下会排队，finally 后自动重试（新 version）
+          return;
+        }
+        // 真冲突（同一字段双方都改）：采用服务器最新内容，不覆盖对方写入；
+        // 本地未保存修改随之丢弃（toast 明示）。
+        entry.value = server;
+        baseTitle = server.title;
+        baseContent = server.content;
+        dirtyFields = new Set();
+        mergeRetries = 0;
+        queuedSaves = queuedSaves.filter((q) => q.id !== id);
+        saveState.value = "saved";
+        emit("saved", server);
+        showToast("条目已在其他设备被修改，已加载最新内容");
+        return;
+      }
+    }
     if (entry.value && entry.value.id === id) {
       saveState.value = "dirty";
     }
@@ -113,7 +198,8 @@ async function saveSnapshot(
     persistInFlight = false;
     const next = queuedSaves.shift();
     if (next) {
-      void saveSnapshot(next.id, next.title, next.content); // 续存排队期间的最新修改
+      // 续存排队期间的最新修改
+      void saveSnapshot(next.id, next.patch, next.version, next.fields);
     }
   }
 }
@@ -123,10 +209,14 @@ async function loadEntry(id: number): Promise<void> {
   loading.value = true;
   entry.value = null;
   saveState.value = "saved";
+  dirtyFields = new Set();
+  mergeRetries = 0;
   try {
     const data = await writerApi.getEntry(id);
     if (seq !== loadSeq) return; // 已切到其他条目，丢弃
     entry.value = data;
+    baseTitle = data.title;
+    baseContent = data.content;
   } catch (error) {
     if (seq !== loadSeq) return;
     showToast(error instanceof Error ? error.message : "加载条目失败", "error");
@@ -152,12 +242,13 @@ watch(
   }
 );
 
-/** 用户输入（@input 驱动）：标记待保存并防抖落盘。IME 组合中不触发。 */
-function onUserInput(e: Event): void {
+/** 用户输入（@input 驱动）：标记脏字段并防抖落盘。IME 组合中不触发。 */
+function onUserInput(e: Event, field: "title" | "content"): void {
   if (!entry.value) return;
   // 中文输入法组合中（未确认），不触发保存；compositionend 后会再发一次
   // input 事件（isComposing=false）补上。
   if ((e as InputEvent).isComposing) return;
+  dirtyFields.add(field);
   saveState.value = "dirty";
   if (saveTimer !== null) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
@@ -240,14 +331,14 @@ onBeforeUnmount(() => {
       placeholder="未命名条目"
       aria-label="条目标题"
       spellcheck="false"
-      @input="entry.title = ($event.target as HTMLInputElement).value; onUserInput($event)"
+      @input="entry.title = ($event.target as HTMLInputElement).value; onUserInput($event, 'title')"
     />
     <textarea
       :value="entry.content"
       class="entry-content"
       placeholder="记录这个设定的一切……"
       spellcheck="false"
-      @input="entry.content = ($event.target as HTMLTextAreaElement).value; onUserInput($event)"
+      @input="entry.content = ($event.target as HTMLTextAreaElement).value; onUserInput($event, 'content')"
     ></textarea>
     <div class="entry-actions">
       <button class="entry-close" @click="onDone">完成</button>

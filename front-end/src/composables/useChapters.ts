@@ -2,6 +2,7 @@ import { ref, computed, watch } from "vue";
 import SparkMD5 from "spark-md5";
 import * as chapterApi from "../api/chapter";
 import { syncRequest, ApiClientError } from "../api/http";
+import { showToast } from "./useToast";
 import type { Chapter, ChapterSummary } from "../types/chapter";
 import { AUTOSAVE_IDLE_MS } from "../config";
 import { getTextStats } from "../utils/textStats";
@@ -43,6 +44,12 @@ export function useChapters() {
 
   let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
   let saveQueued = false;
+  /** 409 自动合并重试上限：连续冲突超过则采用服务器内容，避免对方持续写入时死循环。 */
+  const MAX_MERGE_RETRIES = 3;
+  let mergeRetries = 0;
+  /** 字段级基线：上次加载/保存成功后的值（409 对比与只存脏字段）。 */
+  let baseTitle = "";
+  let baseContent = "";
   /** Guards the immediate post-conflict retry against infinite loops. */
   let conflictRetryInFlight = false;
 
@@ -85,6 +92,8 @@ export function useChapters() {
     list.value = [];
     current.value = null;
     savedHash.value = null;
+    baseTitle = "";
+    baseContent = "";
     saveError.value = null;
   }
 
@@ -109,6 +118,9 @@ export function useChapters() {
       current.value = chapter;
       // Seed savedHash from the loaded content so it starts "clean".
       savedHash.value = hashOf(chapter.title, chapter.content);
+      mergeRetries = 0;
+      baseTitle = chapter.title;
+      baseContent = chapter.content;
     });
   }
 
@@ -119,6 +131,9 @@ export function useChapters() {
       list.value.push(toSummary(chapter));
       current.value = chapter;
       savedHash.value = hashOf(chapter.title, chapter.content);
+      mergeRetries = 0;
+      baseTitle = chapter.title;
+      baseContent = chapter.content;
     });
   }
 
@@ -129,6 +144,11 @@ export function useChapters() {
 
     const hash = currentHash();
     if (hash === savedHash.value) return; // no change
+    // 字段级 patch：只发送实际变化的字段，避免覆盖其他设备（如 MCP）的写入。
+    const patch: { title?: string; content?: string } = {};
+    if (chapter.title !== baseTitle) patch.title = chapter.title;
+    if (chapter.content !== baseContent) patch.content = chapter.content;
+    if (Object.keys(patch).length === 0) return;
     if (saving.value) {
       // A save is already in flight: remember to re-save when it finishes
       // instead of silently dropping these edits.
@@ -139,11 +159,13 @@ export function useChapters() {
     saving.value = true;
     try {
       const saved = await chapterApi.saveChapter(chapter.id, {
-        title: chapter.title,
-        content: chapter.content,
+        ...patch,
         baseVersion: chapter.version,
       });
       savedHash.value = hash;
+      mergeRetries = 0;
+      baseTitle = saved.title;
+      baseContent = saved.content;
       chapter.updateTime = saved.updateTime;
       chapter.version = saved.version;
       chapter.contentHash = saved.contentHash;
@@ -161,13 +183,43 @@ export function useChapters() {
     } catch (error) {
       saveError.value = error instanceof Error ? error.message : "保存失败";
       if (error instanceof ApiClientError && error.code === 409) {
-        // Race window only: with the single-active-session policy the other
-        // device is kicked the moment its own write succeeds, so a 409 here
-        // means both devices wrote in flight. The server told us its current
-        // version — align and retry immediately (a third write cannot win
-        // while we hold the session). Not rethrown: the follow-up save is
-        // guaranteed to persist the content, so callers (flush/select) may
-        // proceed.
+        // 服务器已被其他设备改写（409 带最新章节）：
+        // - 对方只改了非脏字段 → 自动合并（双方保留），以服务器为基线重试；
+        // - 对方改了同一字段（真冲突）→ 采用服务器内容，不覆盖对方写入。
+        const data = error.data as
+          | { version?: number; chapter?: Chapter }
+          | undefined;
+        if (data?.chapter && current.value?.id === chapter.id) {
+          const server = data.chapter;
+          const serverChanged = {
+            title: server.title !== baseTitle,
+            content: server.content !== baseContent,
+          };
+          const titleConflict = patch.title !== undefined && serverChanged.title;
+          const contentConflict =
+            patch.content !== undefined && serverChanged.content;
+          if (!titleConflict && !contentConflict && mergeRetries < MAX_MERGE_RETRIES) {
+            // 无真冲突：合并重试（在途标志下排队，finally 后自动续存）。
+            // 连续冲突超过上限则视为对方持续写入，停止重试（避免死循环）。
+            mergeRetries++;
+            baseTitle = server.title;
+            baseContent = server.content;
+            chapter.version = server.version;
+            chapter.title =
+              patch.title !== undefined ? chapter.title : server.title;
+            chapter.content =
+              patch.content !== undefined ? chapter.content : server.content;
+            saveError.value = null;
+            saveQueued = true;
+            return;
+          }
+          // 真冲突：采用服务器内容，本地未保存修改丢弃（toast 明示）。
+          mergeRetries = 0;
+          applyServerChapter(server);
+          showToast("章节已在其他设备被修改，已加载最新内容");
+          return;
+        }
+        // 老后端无 chapter 数据：对齐 version 后重试（本地权威兜底）。
         saveQueued = false;
         const serverVersion = (error.data as { version?: number } | undefined)
           ?.version;
@@ -230,6 +282,8 @@ export function useChapters() {
     if (current.value?.id !== chapter.id) return;
     current.value = chapter;
     savedHash.value = hashOf(chapter.title, chapter.content);
+    baseTitle = chapter.title;
+    baseContent = chapter.content;
     saveError.value = null;
   }
 
@@ -255,6 +309,8 @@ export function useChapters() {
     if (current.value?.id === id) {
       current.value = null;
       savedHash.value = null;
+      baseTitle = "";
+      baseContent = "";
     }
   }
 
@@ -309,6 +365,8 @@ export function useChapters() {
       list.value = await chapterApi.reorderChapters(source.bookId, orderedIds);
       current.value = copied;
       savedHash.value = hashOf(copied.title, copied.content);
+      baseTitle = copied.title;
+      baseContent = copied.content;
     } catch (error) {
       list.value = list.value.filter((chapter) => chapter.id !== created.id);
       await chapterApi.deleteChapter(created.id).catch(() => undefined);

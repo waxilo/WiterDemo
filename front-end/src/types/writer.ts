@@ -45,6 +45,7 @@ export interface Entry {
   content: string;
   sortOrder: number;
   updateTime: string;
+  version: number;
 }
 
 export const ENTRY_TYPE_LABELS: Record<EntryType, string> = {

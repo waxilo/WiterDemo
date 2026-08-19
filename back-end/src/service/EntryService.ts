@@ -17,6 +17,7 @@ function toEntry(row: EntryRow): Entry {
     content: row.content,
     sortOrder: row.sort_order,
     updateTime: row.update_time,
+    version: row.version,
   };
 }
 
@@ -89,7 +90,8 @@ export async function updateEntry(
   env: Env,
   userId: number,
   entryId: number,
-  patch: { title?: string; content?: string; type?: string }
+  patch: { title?: string; content?: string; type?: string },
+  baseVersion?: number
 ): Promise<Entry> {
   const current = await getEntry(env, userId, entryId);
 
@@ -97,13 +99,38 @@ export async function updateEntry(
   const nextType = patch.type !== undefined ? assertType(patch.type) : current.type;
   const nextContent = patch.content ?? current.content;
 
+  if (baseVersion === undefined) {
+    // 无版本（MCP/兼容调用）：直接覆盖，但同样递增 version，
+    // 使持有旧快照的客户端（网页端）后续保存必然 409，不再覆盖本写入。
+    const row = await env.DB.prepare(
+      `update t_entry set title = ?, content = ?, type = ?, version = version + 1,
+         update_time = CURRENT_TIMESTAMP
+       where id = ? returning *`
+    )
+      .bind(nextTitle, nextContent, nextType, entryId)
+      .first<EntryRow>();
+    if (!row) throw new ApiError(500, "更新条目失败");
+    return toEntry(row);
+  }
+
+  // 乐观锁：写操作基于客户端加载的版本；版本不符 → 409 并回传最新状态，
+  // 客户端据此恢复（不覆盖其他设备的写入）。
   const row = await env.DB.prepare(
-    `update t_entry set title = ?, content = ?, type = ?, update_time = CURRENT_TIMESTAMP
-     where id = ? returning *`
+    `update t_entry set title = ?, content = ?, type = ?, version = version + 1,
+       update_time = CURRENT_TIMESTAMP
+     where id = ? and version = ? returning *`
   )
-    .bind(nextTitle, nextContent, nextType, entryId)
+    .bind(nextTitle, nextContent, nextType, entryId, baseVersion)
     .first<EntryRow>();
-  if (!row) throw new ApiError(500, "更新条目失败");
+  if (!row) {
+    const latest = await env.DB.prepare(`select * from t_entry where id = ?`)
+      .bind(entryId)
+      .first<EntryRow>();
+    throw new ApiError(409, "条目已在其他设备被修改", {
+      version: latest?.version ?? 0,
+      entry: latest ? toEntry(latest) : null,
+    });
+  }
   return toEntry(row);
 }
 

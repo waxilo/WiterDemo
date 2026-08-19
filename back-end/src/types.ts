@@ -118,6 +118,7 @@ export interface EntryRow {
   sort_order: number;
   create_time: string;
   update_time: string;
+  version: number;
 }
 
 /** Entry returned to the client. */
@@ -129,6 +130,7 @@ export interface Entry {
   content: string;
   sortOrder: number;
   updateTime: string;
+  version: number;
 }
 
 /** Writing calendar: words written per UTC day. */

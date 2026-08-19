@@ -5,7 +5,6 @@ import {
 } from "../utils/token";
 import {
   createSession,
-  revokeAllExcept,
   revokeAllForUser,
 } from "./SessionService";
 import { ApiError } from "../errors";
@@ -136,7 +135,7 @@ interface UserPasswordRow {
  * in place on first successful login (lazy migration). Failed attempts are
  * rate-limited per username+IP.
  */
-/** client = "mcp" 标记 AI 工具会话（豁免单会话抢占）。 */
+/** client = "mcp" 标记 AI 工具会话（多会话并存，无需抢占）。 */
 export async function login(
   username: string,
   password: string,

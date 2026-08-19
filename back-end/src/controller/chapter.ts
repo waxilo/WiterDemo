@@ -15,8 +15,8 @@ interface CreateChapterBody {
 }
 
 interface SaveChapterBody {
-  title: string;
-  content: string;
+  title?: string;
+  content?: string;
   baseVersion?: number;
   baseUpdateTime?: string;
 }
@@ -91,8 +91,12 @@ export async function saveChapter(ctx: Ctx): Promise<Response> {
     ctx.userId,
     assertId(ctx.params.id, "章节 id"),
     {
-      title: assertString(body.title, "章节标题", CHAPTER_TITLE_MAX),
-      content: assertContent(body.content),
+      title:
+        body.title === undefined
+          ? undefined
+          : assertString(body.title, "章节标题", CHAPTER_TITLE_MAX),
+      content:
+        body.content === undefined ? undefined : assertContent(body.content),
       baseVersion: assertOptionalInt(body.baseVersion, "版本号"),
       baseUpdateTime:
         body.baseUpdateTime === undefined

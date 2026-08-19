@@ -92,7 +92,7 @@ export function createEntry(
 
 export function updateEntry(
   id: number,
-  patch: { title?: string; content?: string; type?: EntryType }
+  patch: { title?: string; content?: string; type?: EntryType; baseVersion?: number }
 ): Promise<Entry> {
   return request<Entry>(`/entries/${id}`, { method: "PUT", body: patch });
 }

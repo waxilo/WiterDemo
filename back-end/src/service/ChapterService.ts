@@ -5,8 +5,9 @@ import { sha256Hex } from "../utils/token";
 import { logWords, snapshotChapter } from "./WriteLogService";
 
 export interface SaveChapterInput {
-  title: string;
-  content: string;
+  /** 缺省表示不修改该字段（字段级保存：只更新实际修改的部分）。 */
+  title?: string;
+  content?: string;
   /**
    * The `version` the client loaded. The write itself is conditioned on it
    * (`WHERE version = ?`), so concurrent saves are serialized atomically:
@@ -140,15 +141,19 @@ export async function saveChapter(
 ): Promise<Chapter> {
   const row = await getOwnedChapterRow(env, userId, chapterId);
 
-  const stats = getContentStats(input.content);
-  const contentHash = await sha256Hex(input.content);
+  // 字段级合并：缺省的字段保留服务器当前值。
+  const nextTitle = input.title === undefined ? row.title : input.title.trim() || "未命名章节";
+  const nextContent = input.content === undefined ? row.content : input.content;
+
+  const stats = getContentStats(nextContent);
+  const contentHash = await sha256Hex(nextContent);
 
   const useVersion =
     typeof input.baseVersion === "number" && Number.isSafeInteger(input.baseVersion);
   const versionGuard = useVersion ? " and version = ?" : "";
   const args: unknown[] = [
-    input.title.trim() || "未命名章节",
-    input.content,
+    nextTitle,
+    nextContent,
     contentHash,
     stats.wordCount,
     stats.charCount,
@@ -170,9 +175,10 @@ export async function saveChapter(
       // Zero rows matched: another device saved in between -> conflict. The
       // payload carries the server's current state so the client can align
       // its base version without an extra round-trip (or fetching content).
-      throw new ApiError(409, "章节已在其他设备被修改，已自动重试保存", {
+      throw new ApiError(409, "章节已在其他设备被修改", {
         version: row.version,
         updateTime: row.update_time,
+        chapter: toChapter(row),
       });
     }
     // Legacy path: pre-check update_time (best effort, second precision).
@@ -180,9 +186,10 @@ export async function saveChapter(
       input.baseUpdateTime !== undefined &&
       row.update_time !== input.baseUpdateTime
     ) {
-      throw new ApiError(409, "章节已在其他设备被修改，已自动重试保存", {
+      throw new ApiError(409, "章节已在其他设备被修改", {
         version: row.version,
         updateTime: row.update_time,
+        chapter: toChapter(row),
       });
     }
     throw new ApiError(500, "保存章节失败");

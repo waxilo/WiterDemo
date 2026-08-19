@@ -152,23 +152,3 @@ export async function revokeAllForUser(
     .bind(userId)
     .run();
 }
-
-/**
- * Revoke every NON-MCP session of a user EXCEPT the given one. This is the
- * single-active-session kick: after a successful write, every other device of
- * the same account is signed out (their next request gets a 401 and the
- * client force-logs out). MCP/AI-tool sessions (is_mcp=1) are exempt so a
- * long-running AI integration is not kicked by normal web writing.
- */
-export async function revokeAllExcept(
-  env: Env,
-  userId: number,
-  exceptJti: string
-): Promise<void> {
-  await env.DB.prepare(
-    `update t_login_log set revoked = 1
-     where user_id = ? and jti != ? and revoked = 0 and is_mcp = 0`
-  )
-    .bind(userId, exceptJti)
-    .run();
-}

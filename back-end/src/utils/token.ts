@@ -24,7 +24,7 @@ interface AccessPayload {
   /**
    * The refresh-token session id this access token belongs to. Lets write
    * operations revoke every OTHER session of the same account while keeping
-   * the calling session alive (single-active-session policy).
+   * the calling session alive.
    */
   sid?: string;
 }

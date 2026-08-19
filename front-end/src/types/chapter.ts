@@ -56,7 +56,8 @@ export interface OutlineHeading {
  * overwrite each other.
  */
 export interface SaveChapterPayload {
-  title: string;
-  content: string;
+  /** 缺省表示不修改该字段（字段级保存）。 */
+  title?: string;
+  content?: string;
   baseVersion: number;
 }

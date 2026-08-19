@@ -12,6 +12,7 @@ interface EntryBody {
   type?: string;
   title?: string;
   content?: string;
+  baseVersion?: number;
 }
 
 /** List entries of a book, optionally filtered by ?type=character|location|concept. */
@@ -67,7 +68,8 @@ export async function updateEntry(ctx: Ctx): Promise<Response> {
         body.content === undefined
           ? undefined
           : assertString(body.content, "条目内容", 500_000),
-    }
+    },
+    body.baseVersion
   );
   return jsonResponse(entry);
 }

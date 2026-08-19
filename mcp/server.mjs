@@ -48,7 +48,7 @@ async function runLogin() {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-Client": "mcp", // 标记 AI 工具会话，豁免单会话抢占
+      "X-Client": "mcp", // 标记 AI 工具会话（多会话并存，无需抢占）
     },
     body: JSON.stringify({ username, password }),
   });
@@ -191,15 +191,14 @@ const text = (data) => ({
   content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
 });
 
-/** 章节修改：先取最新版本作为乐观锁基线；并发 409 时自动重试一次。 */
+/** 章节修改：字段级保存（只发送 patch 提供的字段，服务器保留其余字段），
+ * 以最新版本为乐观锁基线；并发 409 时重取最新再试一次。 */
 async function saveChapter(chapterId, patch) {
   for (let attempt = 0; ; attempt++) {
     const current = await api(`/chapters/${chapterId}`);
-    const payload = {
-      title: patch.title ?? current.title,
-      content: patch.content ?? current.content,
-      baseVersion: current.version,
-    };
+    const payload = { baseVersion: current.version };
+    if (patch.title !== undefined) payload.title = patch.title;
+    if (patch.content !== undefined) payload.content = patch.content;
     try {
       return await api(`/chapters/${chapterId}`, {
         method: "PUT",
@@ -262,7 +261,7 @@ server.tool(
 server.tool(
   "update_chapter",
   "修改章节的标题和/或正文（整体替换 content；省略的字段保持不变）。" +
-    "注意：这是写操作，会按单会话策略使网页端下线，需重新登录",
+    "注意：这是写操作；多会话并存，不会使网页端下线（同字段并发修改由乐观锁保护）",
   {
     chapterId: z.number().int().positive(),
     title: z.string().max(200).optional(),
@@ -331,7 +330,7 @@ server.tool(
 
 server.tool(
   "update_entry",
-  "修改设定条目（标题/正文/类型；省略的字段保持不变）。写操作，会按单会话策略使网页端下线",
+  "修改设定条目（标题/正文/类型；省略的字段保持不变，字段级保存互不覆盖）。写操作；多会话并存，不会使网页端下线",
   {
     entryId: z.number().int().positive(),
     title: z.string().max(200).optional(),

@@ -21,7 +21,7 @@ interface RefreshBody {
 export async function login(ctx: Ctx): Promise<Response> {
   const body = await ctx.json<LoginBody>();
   const ip = ctx.request.headers.get("CF-Connecting-IP") ?? "";
-  // AI 工具（MCP）登录时带 X-Client: mcp 标记会话，豁免单会话抢占。
+  // AI 工具（MCP）登录时带 X-Client: mcp 标记会话（多会话并存，无需抢占）。
   const client = ctx.request.headers.get("X-Client") ?? undefined;
   const tokens = await authService.login(
     body.username,
@@ -75,7 +75,7 @@ export async function refresh(ctx: Ctx): Promise<Response> {
       return jsonResponse(null, 401, "登录状态已失效");
     }
     if (row.revoked === 1) {
-      // Kicked by the single-active-session policy (another device wrote) or
+      // Session revoked (logged out, rotated away, or password changed) or
       // logged out — the client force-logs out with a clear reason.
       return jsonResponse(null, 401, "账号已在其他设备使用，请重新登录");
     }
