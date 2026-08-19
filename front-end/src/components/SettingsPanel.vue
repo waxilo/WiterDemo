@@ -101,7 +101,7 @@ function onEdited(result: Entry | "deleted" | null): void {
     </div>
 
     <p v-if="!loading && entries.length === 0" class="settings-empty">
-      还没有条目，点击 + 新建
+      还没有条目，点击下方新建
     </p>
     <nav v-else class="settings-list">
       <button
@@ -117,6 +117,10 @@ function onEdited(result: Entry | "deleted" | null): void {
         <span class="settings-title">{{ entry.title || "未命名条目" }}</span>
       </button>
     </nav>
+
+    <button class="settings-create" @click="onCreate">
+      ＋ 新建设定
+    </button>
 
     <EntryEditDialog
       v-if="editingId !== null"
@@ -200,6 +204,25 @@ function onEdited(result: Entry | "deleted" | null): void {
   margin: 10px 14px;
   font-size: 12px;
   color: #b6b0a1;
+}
+
+.settings-create {
+  flex-shrink: 0;
+  margin: 4px 10px 12px;
+  padding: 9px 0;
+  font-size: 13px;
+  color: #8a8577;
+  background: transparent;
+  border: 1px dashed #d8d2c4;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.settings-create:hover {
+  background: #f0eee7;
+  color: #444;
+  border-color: #c4bcaa;
 }
 
 .settings-list {

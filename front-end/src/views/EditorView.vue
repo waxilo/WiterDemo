@@ -7,6 +7,7 @@ import ChapterEditor from "../components/ChapterEditor.vue";
 import FindReplacePanel from "../components/FindReplacePanel.vue";
 import OutlinePanel from "../components/OutlinePanel.vue";
 import HistoryDialog from "../components/HistoryDialog.vue";
+import SettingsPanel from "../components/SettingsPanel.vue";
 
 import { useConfirm } from "../composables/useConfirm";
 import { showToast } from "../composables/useToast";
