@@ -27,29 +27,52 @@ const loading = ref(true);
 const saveState = ref<"saved" | "saving" | "dirty">("saved");
 const { busy: deleting, run: runDelete } = useBusy();
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+/** 加载序号：丢弃过期响应（快速切换条目时防串写）。 */
+let loadSeq = 0;
 
-onMounted(async () => {
+async function loadEntry(id: number): Promise<void> {
+  const seq = ++loadSeq;
+  loading.value = true;
+  entry.value = null;
+  saveState.value = "saved";
   try {
-    entry.value = await writerApi.getEntry(props.entryId);
+    const data = await writerApi.getEntry(id);
+    if (seq !== loadSeq) return; // 已切到其他条目，丢弃
+    entry.value = data;
   } catch (error) {
+    if (seq !== loadSeq) return;
     showToast(error instanceof Error ? error.message : "加载条目失败", "error");
   } finally {
-    loading.value = false;
+    if (seq === loadSeq) loading.value = false;
   }
+}
+
+onMounted(() => {
+  void loadEntry(props.entryId);
 });
 
-// 标题/内容变更 → 防抖自动保存。
+// 条目切换（全屏点左侧不同条目/弹窗换条目）：先落盘旧条目挂起修改，再加载新条目。
 watch(
-  [() => entry.value?.title, () => entry.value?.content],
-  () => {
-    if (!entry.value) return;
-    saveState.value = "dirty";
-    if (saveTimer !== null) clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => {
+  () => props.entryId,
+  (id) => {
+    if (saveTimer !== null) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
       void persist();
-    }, 800);
+    }
+    void loadEntry(id);
   }
 );
+
+/** 用户输入（@input 驱动）：标记待保存并防抖落盘。 */
+function onUserInput(): void {
+  if (!entry.value) return;
+  saveState.value = "dirty";
+  if (saveTimer !== null) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    void persist();
+  }, 800);
+}
 
 async function persist(): Promise<void> {
   const current = entry.value;
@@ -61,15 +84,18 @@ async function persist(): Promise<void> {
       title: current.title,
       content: current.content,
     });
-    // 字段级同步（不替换对象，避免输入框 v-model 重新绑定）。
-    if (entry.value) {
+    // 字段级同步（不替换对象，避免输入框重新绑定）。
+    // 守卫 id：切换条目后旧保存响应不得覆盖新条目。
+    if (entry.value && entry.value.id === current.id) {
       entry.value.title = saved.title;
       entry.value.content = saved.content;
+      saveState.value = "saved";
     }
-    saveState.value = "saved";
     emit("saved", saved);
   } catch (error) {
-    saveState.value = "dirty";
+    if (entry.value && entry.value.id === current.id) {
+      saveState.value = "dirty";
+    }
     showToast(error instanceof Error ? error.message : "保存失败", "error");
   }
 }
@@ -140,17 +166,19 @@ onBeforeUnmount(() => {
       </div>
     </div>
     <input
-      v-model="entry.title"
+      :value="entry.title"
       class="entry-title-input"
       placeholder="未命名条目"
       aria-label="条目标题"
       spellcheck="false"
+      @input="entry.title = ($event.target as HTMLInputElement).value; onUserInput()"
     />
     <textarea
-      v-model="entry.content"
+      :value="entry.content"
       class="entry-content"
       placeholder="记录这个设定的一切……"
       spellcheck="false"
+      @input="entry.content = ($event.target as HTMLTextAreaElement).value; onUserInput()"
     ></textarea>
     <div class="entry-actions">
       <button class="entry-close" @click="onDone">完成</button>

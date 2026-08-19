@@ -1,17 +1,17 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onBeforeUnmount } from "vue";
+import { ref, onMounted, onBeforeUnmount } from "vue";
 import * as writerApi from "../api/writer";
 import type { Entry, EntryType } from "../types/writer";
-import { ENTRY_TYPE_LABELS } from "../types/writer";
 import { showToast } from "../composables/useToast";
 import { useBusy } from "../composables/useBusy";
+import EntryList from "./EntryList.vue";
 import EntryEditDialog from "./EntryEditDialog.vue";
-import LoadingIndicator from "./LoadingIndicator.vue";
 import EntryEditor from "./EntryEditor.vue";
 
 /**
  * 设定资料库（右侧面板）：人物 / 地点 / 设定 条目列表。
  * 窄面板点击条目弹层编辑；「全屏」按钮铺开覆盖整个屏幕（左列表 + 右内联编辑）。
+ * 列表本体抽到 EntryList 供两种形态共用，保证交互一致。
  */
 const props = defineProps<{ bookId: number }>();
 
@@ -26,9 +26,7 @@ const expanded = ref(false);
 const { busy: creating, run: runCreate } = useBusy();
 
 function onKeydown(e: KeyboardEvent): void {
-  if (e.key === "Escape" && expanded.value) {
-    expanded.value = false;
-  }
+  if (e.key === "Escape" && expanded.value) closeExpanded();
 }
 
 onMounted(() => {
@@ -48,11 +46,13 @@ async function loadList(): Promise<void> {
   }
 }
 
-watch(filter, () => {
+function onFilterChange(type: Filter): void {
+  if (type === filter.value) return;
+  filter.value = type;
   // 切换类型时清空编辑器选中，避免右侧仍显示上一类型的条目造成"未切换"错觉。
   editingId.value = null;
   void loadList();
-});
+}
 
 async function onCreate(): Promise<void> {
   const type: EntryType = filter.value;
@@ -80,90 +80,72 @@ function onEditedClose(deleted: boolean): void {
     entries.value = entries.value.filter((e) => e.id !== id);
   }
 }
+
+/** 退出全屏：同时清空编辑选中，避免退出后弹层从背后弹出。 */
+function closeExpanded(): void {
+  expanded.value = false;
+  editingId.value = null;
+}
 </script>
 
 <template>
   <div class="settings">
-    <div class="settings-tabs">
-      <button
-        v-for="tab in (['character', 'location', 'concept'] as const)"
-        :key="tab"
-        class="settings-tab"
-        :class="{ active: filter === tab }"
-        @click="filter = tab"
+    <!-- 窄面板形态 -->
+    <template v-if="!expanded">
+      <EntryList
+        :filter="filter"
+        :entries="entries"
+        :loading="loading"
+        :editing-id="editingId"
+        @update:filter="onFilterChange"
+        @select="editingId = $event"
       >
-        {{ ENTRY_TYPE_LABELS[tab] }}
-      </button>
-    </div>
+        <template #headActions>
+          <button
+            class="settings-add"
+            title="新建条目"
+            aria-label="新建条目"
+            :disabled="creating"
+            @click="onCreate"
+          >
+            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+              <path
+                d="M12 5v14M5 12h14"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+              />
+            </svg>
+          </button>
+          <button
+            class="settings-add"
+            title="全屏展开"
+            aria-label="全屏展开"
+            @click="expanded = true"
+          >
+            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+              <path
+                d="M4 9V5a1 1 0 0 1 1-1h4M20 9V5a1 1 0 0 0-1-1h-4M4 15v4a1 1 0 0 0 1 1h4M20 15v4a1 1 0 0 1-1 1h-4"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+        </template>
+      </EntryList>
 
-    <div class="settings-list-head">
-      <span class="settings-label">{{ ENTRY_TYPE_LABELS[filter] }}</span>
-      <div class="settings-head-actions">
-        <button
-          class="settings-add"
-          title="新建条目"
-          aria-label="新建条目"
-          :disabled="creating"
-          @click="onCreate"
-        >
-          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
-            <path
-              d="M12 5v14M5 12h14"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-            />
-          </svg>
-        </button>
-        <button
-          class="settings-add"
-          title="全屏展开"
-          aria-label="全屏展开"
-          @click="expanded = true"
-        >
-          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
-            <path
-              d="M4 9V5a1 1 0 0 1 1-1h4M20 9V5a1 1 0 0 0-1-1h-4M4 15v4a1 1 0 0 0 1 1h4M20 15v4a1 1 0 0 1-1 1h-4"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-          </svg>
-        </button>
-      </div>
-    </div>
-
-    <div v-if="loading" class="settings-loading">
-      <LoadingIndicator text="加载中" />
-    </div>
-    <p v-else-if="entries.length === 0" class="settings-empty">
-      还没有条目，点击右上角 + 新建
-    </p>
-    <nav v-else class="settings-list">
-      <button
-        v-for="entry in entries"
-        :key="entry.id"
-        class="settings-item"
-        :class="{ active: editingId === entry.id }"
-        @click="editingId = entry.id"
-      >
-        <span class="settings-type" :class="entry.type">{{
-          ENTRY_TYPE_LABELS[entry.type]
-        }}</span>
-        <span class="settings-title">{{ entry.title || "未命名条目" }}</span>
-      </button>
-    </nav>
-
-    <EntryEditDialog
-      v-if="editingId !== null && !expanded"
-      :entry-id="editingId"
-      @close="onEditedClose(false)"
-      @saved="onSaved"
-      @deleted="onEditedClose(true)"
-    />
+      <EntryEditDialog
+        v-if="editingId !== null"
+        :entry-id="editingId"
+        @close="onEditedClose(false)"
+        @saved="onSaved"
+        @deleted="onEditedClose(true)"
+      />
+    </template>
 
     <!-- 全屏铺开：左列表 + 右内联编辑器，覆盖整个屏幕 -->
     <Teleport to="body">
@@ -174,7 +156,7 @@ function onEditedClose(deleted: boolean): void {
             <button class="expanded-new" :disabled="creating" @click="onCreate">
               {{ creating ? "创建中…" : "＋ 新建条目" }}
             </button>
-            <button class="expanded-close" @click="expanded = false">
+            <button class="expanded-close" @click="closeExpanded">
               关闭（Esc）
             </button>
           </div>
@@ -182,40 +164,14 @@ function onEditedClose(deleted: boolean): void {
 
         <div class="expanded-body">
           <aside class="expanded-sidebar">
-            <div class="settings-tabs">
-              <button
-                v-for="tab in (['character', 'location', 'concept'] as const)"
-                :key="tab"
-                class="settings-tab"
-                :class="{ active: filter === tab }"
-                @click="filter = tab"
-              >
-                {{ ENTRY_TYPE_LABELS[tab] }}
-              </button>
-            </div>
-            <div class="settings-list-head">
-              <span class="settings-label">{{ ENTRY_TYPE_LABELS[filter] }}</span>
-            </div>
-            <div v-if="loading" class="settings-loading">
-      <LoadingIndicator text="加载中" />
-    </div>
-            <p v-else-if="entries.length === 0" class="settings-empty">
-              还没有条目，点击右上角 + 新建
-            </p>
-            <nav v-else class="settings-list">
-              <button
-                v-for="entry in entries"
-                :key="entry.id"
-                class="settings-item"
-                :class="{ active: editingId === entry.id }"
-                @click="editingId = entry.id"
-              >
-                <span class="settings-type" :class="entry.type">{{
-                  ENTRY_TYPE_LABELS[entry.type]
-                }}</span>
-                <span class="settings-title">{{ entry.title || "未命名条目" }}</span>
-              </button>
-            </nav>
+            <EntryList
+              :filter="filter"
+              :entries="entries"
+              :loading="loading"
+              :editing-id="editingId"
+              @update:filter="onFilterChange"
+              @select="editingId = $event"
+            />
           </aside>
 
           <section class="expanded-editor">
@@ -243,150 +199,7 @@ function onEditedClose(deleted: boolean): void {
   min-height: 0;
 }
 
-.settings-tabs {
-  display: flex;
-  gap: 2px;
-  padding: 12px 10px 6px;
-}
-
-.settings-tab {
-  flex: 1;
-  padding: 5px 0;
-  font-size: 12px;
-  color: #8a8577;
-  background: transparent;
-  border: none;
-  border-radius: 7px;
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-
-.settings-tab:hover {
-  background: #f0eee7;
-  color: #444;
-}
-
-.settings-tab.active {
-  background: #fff;
-  color: #444;
-  font-weight: 600;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-}
-
-.settings-list-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px 6px;
-}
-
-.settings-label {
-  font-size: 12.5px;
-  font-weight: 600;
-  color: #8a8577;
-}
-
-.settings-add {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  color: #8a8577;
-  background: transparent;
-  border: none;
-  border-radius: 7px;
-  cursor: pointer;
-}
-
-.settings-add:hover {
-  background: #f0eee7;
-  color: #444;
-}
-
-.settings-loading {
-  padding: 18px 14px;
-  display: flex;
-  justify-content: center;
-}
-
-.settings-empty {
-  margin: 10px 14px;
-  font-size: 12px;
-  color: #b6b0a1;
-}
-
-.settings-list {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 0 8px 12px;
-}
-
-.settings-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 7px 10px;
-  font-size: 13px;
-  text-align: left;
-  color: #4a4a44;
-  background: transparent;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: background 0.14s ease;
-}
-
-.settings-item:hover {
-  background: rgba(255, 255, 255, 0.62);
-}
-
-.settings-item.active {
-  background: #f0ede5;
-  color: #333;
-}
-
-.settings-type {
-  flex-shrink: 0;
-  padding: 1px 6px;
-  font-size: 10.5px;
-  border-radius: 999px;
-}
-
-.settings-type.character {
-  color: #b0524a;
-  background: rgba(196, 93, 85, 0.12);
-}
-
-.settings-type.location {
-  color: #3e6f9c;
-  background: rgba(79, 110, 247, 0.1);
-}
-
-.settings-type.concept {
-  color: #6b7d3a;
-  background: rgba(122, 148, 60, 0.12);
-}
-
-.settings-title {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* ---- 全屏铺开模式 ---- */
-.settings-head-actions {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
 .settings-expanded {
   position: fixed;
   inset: 0;
@@ -525,5 +338,4 @@ function onEditedClose(deleted: boolean): void {
     padding: 12px;
   }
 }
-
 </style>
