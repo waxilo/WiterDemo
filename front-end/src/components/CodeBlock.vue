@@ -1,14 +1,25 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, onBeforeUnmount } from "vue";
 
 /**
- * 代码块：等宽深色展示 + 一键复制（navigator.clipboard，失败时降级
- * textarea+execCommand）。用于教程弹层中的命令/配置示例。
+ * 代码块：等宽深色展示 + 一键复制。命令/配置自动换行完整可见，
+ * 复制按钮复制原始文本（不受显示换行影响）。
  */
-const props = defineProps<{ code: string }>();
+const props = withDefaults(
+  defineProps<{
+    code: string;
+    /** 单行命令样式（蓝色加粗），默认 false */
+    single?: boolean;
+  }>(),
+  { single: false }
+);
 
 const copied = ref(false);
 let resetTimer: ReturnType<typeof setTimeout> | null = null;
+
+onBeforeUnmount(() => {
+  if (resetTimer !== null) clearTimeout(resetTimer);
+});
 
 async function copy(): Promise<void> {
   let ok = false;
@@ -42,10 +53,10 @@ async function copy(): Promise<void> {
 
 <template>
   <div class="code-block">
-    <button class="copy-btn" :class="{ copied }" @click="copy">
+    <button class="copy-btn" :class="{ copied }" type="button" @click="copy">
       {{ copied ? "✓ 已复制" : "复制" }}
     </button>
-    <pre class="code"><code>{{ code }}</code></pre>
+    <pre class="code" :class="{ single }">{{ code }}</pre>
   </div>
 </template>
 
@@ -55,7 +66,6 @@ async function copy(): Promise<void> {
   margin: 6px 0;
   border-radius: 10px;
   background: #23262e;
-  overflow: hidden;
 }
 
 .copy-btn {
@@ -90,21 +100,17 @@ async function copy(): Promise<void> {
 }
 
 .code {
-  box-sizing: border-box;
   margin: 0;
   padding: 12px 14px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12.5px;
   line-height: 1.7;
   color: #dbe2ee;
-  /* 自动换行保证完整可见（命令/配置不因容器宽度被截断）；
-     复制按钮复制的是原始文本，不受显示换行影响。 */
   white-space: pre-wrap;
-  word-break: break-all;
-  overflow-wrap: anywhere;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
-/* 单行命令类代码：等宽、加粗命令名配色 */
 .code.single {
   color: #b9c8f5;
   font-weight: 600;
