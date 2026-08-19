@@ -4,7 +4,9 @@ import * as writerApi from "../api/writer";
 import type { Entry, EntryType } from "../types/writer";
 import { ENTRY_TYPE_LABELS } from "../types/writer";
 import { showToast } from "../composables/useToast";
+import { useBusy } from "../composables/useBusy";
 import EntryEditDialog from "./EntryEditDialog.vue";
+import LoadingIndicator from "./LoadingIndicator.vue";
 import EntryEditor from "./EntryEditor.vue";
 
 /**
@@ -20,6 +22,8 @@ const loading = ref(false);
 const editingId = ref<number | null>(null);
 /** 全屏铺开模式（覆盖整个屏幕）。 */
 const expanded = ref(false);
+/** 新建条目进行中（禁用新建按钮防重复提交）。 */
+const { busy: creating, run: runCreate } = useBusy();
 
 function onKeydown(e: KeyboardEvent): void {
   if (e.key === "Escape" && expanded.value) {
@@ -44,17 +48,21 @@ async function loadList(): Promise<void> {
   }
 }
 
-watch(filter, () => void loadList());
+watch(filter, () => {
+  // 切换类型时清空编辑器选中，避免右侧仍显示上一类型的条目造成"未切换"错觉。
+  editingId.value = null;
+  void loadList();
+});
 
 async function onCreate(): Promise<void> {
   const type: EntryType = filter.value;
-  try {
+  await runCreate(async () => {
     const entry = await writerApi.createEntry(props.bookId, type);
     entries.value.push(entry);
     editingId.value = entry.id;
-  } catch (error) {
+  }).catch((error) => {
     showToast(error instanceof Error ? error.message : "新建条目失败", "error");
-  }
+  });
 }
 
 /** 保存成功：仅同步列表项，不关闭弹窗。 */
@@ -95,6 +103,7 @@ function onEditedClose(deleted: boolean): void {
           class="settings-add"
           title="新建条目"
           aria-label="新建条目"
+          :disabled="creating"
           @click="onCreate"
         >
           <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
@@ -127,7 +136,10 @@ function onEditedClose(deleted: boolean): void {
       </div>
     </div>
 
-    <p v-if="!loading && entries.length === 0" class="settings-empty">
+    <div v-if="loading" class="settings-loading">
+      <LoadingIndicator text="加载中" />
+    </div>
+    <p v-else-if="entries.length === 0" class="settings-empty">
       还没有条目，点击右上角 + 新建
     </p>
     <nav v-else class="settings-list">
@@ -159,7 +171,9 @@ function onEditedClose(deleted: boolean): void {
         <div class="expanded-head">
           <span class="expanded-title">📚 设定资料库</span>
           <div class="expanded-actions">
-            <button class="expanded-new" @click="onCreate">＋ 新建条目</button>
+            <button class="expanded-new" :disabled="creating" @click="onCreate">
+              {{ creating ? "创建中…" : "＋ 新建条目" }}
+            </button>
             <button class="expanded-close" @click="expanded = false">
               关闭（Esc）
             </button>
@@ -182,7 +196,10 @@ function onEditedClose(deleted: boolean): void {
             <div class="settings-list-head">
               <span class="settings-label">{{ ENTRY_TYPE_LABELS[filter] }}</span>
             </div>
-            <p v-if="!loading && entries.length === 0" class="settings-empty">
+            <div v-if="loading" class="settings-loading">
+      <LoadingIndicator text="加载中" />
+    </div>
+            <p v-else-if="entries.length === 0" class="settings-empty">
               还没有条目，点击右上角 + 新建
             </p>
             <nav v-else class="settings-list">
@@ -285,6 +302,12 @@ function onEditedClose(deleted: boolean): void {
 .settings-add:hover {
   background: #f0eee7;
   color: #444;
+}
+
+.settings-loading {
+  padding: 18px 14px;
+  display: flex;
+  justify-content: center;
 }
 
 .settings-empty {

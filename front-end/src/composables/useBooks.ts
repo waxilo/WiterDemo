@@ -1,6 +1,7 @@
 import { ref, computed } from "vue";
 import * as bookApi from "../api/book";
 import type { Book } from "../types/book";
+import { useBusy } from "./useBusy";
 
 /**
  * Bookshelf state: the user's books and which one is currently open.
@@ -11,6 +12,8 @@ export function useBooks() {
   const currentId = ref<number | null>(null);
   const loading = ref(false);
   const error = ref("");
+  /** 创建书籍进行中（书架新建按钮禁用）。 */
+  const { busy: creating, run: runCreate } = useBusy();
 
   const current = computed(
     () => list.value.find((b) => b.id === currentId.value) ?? null
@@ -39,9 +42,11 @@ export function useBooks() {
   }
 
   async function create(): Promise<void> {
-    const book = await bookApi.createBook();
-    list.value.push(book);
-    currentId.value = book.id;
+    await runCreate(async () => {
+      const book = await bookApi.createBook();
+      list.value.push(book);
+      currentId.value = book.id;
+    });
   }
 
   async function remove(id: number): Promise<void> {
@@ -63,6 +68,7 @@ export function useBooks() {
     currentId,
     loading,
     error,
+    creating,
     loadList,
     open,
     backToShelf,

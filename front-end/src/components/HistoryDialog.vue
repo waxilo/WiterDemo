@@ -7,6 +7,7 @@ import * as writerApi from "../api/writer";
 import * as chapterApi from "../api/chapter";
 import type { HistoryItem, HistoryDetail } from "../types/writer";
 import { formatCount } from "../utils/textStats";
+import LoadingIndicator from "./LoadingIndicator.vue";
 
 /**
  * 版本历史：列出章节最近 5 个快照（保存前自动生成），可查看内容并恢复。
@@ -41,16 +42,19 @@ async function loadList(): Promise<void> {
   }
 }
 
+let detailSeq = 0;
+
 async function selectItem(item: HistoryItem): Promise<void> {
   if (selectedId.value === item.id) return;
+  const seq = ++detailSeq; // 只接受最后一次请求的结果
   selectedId.value = item.id;
   selected.value = null;
   try {
-    selected.value = await writerApi.getHistoryItem(
-      props.chapterId,
-      item.id
-    );
+    const detail = await writerApi.getHistoryItem(props.chapterId, item.id);
+    if (seq !== detailSeq) return; // 过期响应（用户已切换其他版本）
+    selected.value = detail;
   } catch (error) {
+    if (seq !== detailSeq) return;
     showToast(error instanceof Error ? error.message : "加载版本失败", "error");
     selectedId.value = null;
   }
@@ -105,7 +109,9 @@ async function restore(): Promise<void> {
       <h3 class="history-title">版本历史</h3>
       <p class="history-sub">每次保存前的版本自动保留，最多 5 个</p>
 
-      <div v-if="loading" class="history-loading">加载中…</div>
+      <div v-if="loading" class="history-loading">
+        <LoadingIndicator text="加载中" />
+      </div>
       <div v-else-if="items.length === 0" class="history-empty">
         暂无历史版本（保存章节后自动生成）
       </div>
@@ -126,7 +132,10 @@ async function restore(): Promise<void> {
         </ul>
 
         <div class="history-preview">
-          <div v-if="!selected" class="history-preview-empty">
+          <div v-if="selectedId !== null && !selected" class="history-preview-empty">
+            <LoadingIndicator text="加载中" />
+          </div>
+          <div v-else-if="!selected" class="history-preview-empty">
             点击左侧版本查看内容
           </div>
           <template v-else>

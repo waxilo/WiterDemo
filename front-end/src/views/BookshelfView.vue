@@ -3,6 +3,7 @@ import { onMounted, onUnmounted, ref, computed } from "vue";
 import type { useBooks } from "../composables/useBooks";
 import BookCard from "../components/BookCard.vue";
 import WritingCalendar from "../components/WritingCalendar.vue";
+import LoadingIndicator from "../components/LoadingIndicator.vue";
 import MCPGuideDialog from "../components/MCPGuideDialog.vue";
 import ChangePasswordDialog from "../components/ChangePasswordDialog.vue";
 import { useConfirm } from "../composables/useConfirm";
@@ -16,7 +17,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ (e: "logout"): void }>();
 
-const { list, loading, error, loadList, open, create, remove } = props.books;
+const { list, loading, error, creating, loadList, open, create, remove } = props.books;
 
 const avatarText = computed(
   () => props.username?.trim().charAt(0).toUpperCase() || "○"
@@ -148,15 +149,15 @@ function onEsc(e: KeyboardEvent) {
             @remove="onRemove"
           />
 
-          <button class="add" @click="onCreate">
+          <button class="add" :disabled="creating" @click="onCreate">
             <span class="plus">+</span>
-            <span class="add-label">新建作品</span>
+            <span class="add-label">{{ creating ? "创建中…" : "新建作品" }}</span>
           </button>
         </div>
 
         <Transition name="fade">
           <div v-if="loading" class="loading-overlay">
-            <span class="spinner"></span>
+            <LoadingIndicator />
           </div>
         </Transition>
       </div>
@@ -433,21 +434,6 @@ h1 {
   background: rgba(245, 243, 238, 0.5);
   backdrop-filter: blur(1px);
   z-index: 2;
-}
-
-.spinner {
-  width: 22px;
-  height: 22px;
-  border: 2px solid rgba(0, 0, 0, 0.12);
-  border-top-color: #8a8577;
-  border-radius: 50%;
-  animation: spin 0.7s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 /* ---- transitions ---- */

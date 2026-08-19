@@ -5,7 +5,11 @@ import {
   clearSession,
   getRefreshToken,
 } from "./api/tokenStore";
-import { cancelProactiveRefresh, scheduleProactiveRefresh } from "./api/http";
+import {
+  cancelProactiveRefresh,
+  scheduleProactiveRefresh,
+  onPendingChange,
+} from "./api/http";
 import { getMe, logout as logoutApi } from "./api/auth";
 import { useBooks } from "./composables/useBooks";
 import { useChapters } from "./composables/useChapters";
@@ -16,11 +20,19 @@ import BookshelfView from "./views/BookshelfView.vue";
 import EditorView from "./views/EditorView.vue";
 import ConfirmDialog from "./components/dialog/ConfirmDialog.vue";
 import ToastHost from "./components/ToastHost.vue";
+import TopProgress from "./components/TopProgress.vue";
 
 const loggedIn = sessionRef();
 const books = useBooks();
 const chapters = useChapters();
 const user = ref<UserInfo | null>(null);
+/** 任一 API 请求在途（驱动全局进度条）。 */
+const requestActive = ref(false);
+// 订阅提前到 setup：immediate watch 触发的早期请求（getMe/token 恢复）
+// 也纳入进度条显示。
+onPendingChange((active) => {
+  requestActive.value = active;
+});
 
 // login -> bookshelf -> editor
 const view = computed<"login" | "shelf" | "editor">(() => {
@@ -104,6 +116,8 @@ async function onLogout() {
   <ConfirmDialog />
   <!-- 全局轻量提示 -->
   <ToastHost />
+  <!-- 全局请求进度条 -->
+  <TopProgress :active="requestActive" />
 </template>
 
 <style>

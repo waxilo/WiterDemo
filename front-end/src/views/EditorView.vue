@@ -38,6 +38,7 @@ const {
   saving,
   dirty,
   saveError,
+  selecting,
   select,
   create,
   remove,
@@ -550,6 +551,7 @@ function onReorder(ids: number[]) {
           :current-id="current?.id ?? null"
           :current-word-count="currentStats.wordCount"
           :loading="loading"
+          :busy="selecting"
           @select="onSelect"
           @create="onCreate"
           @create-volume="onCreateVolume"
@@ -611,12 +613,16 @@ function onReorder(ids: number[]) {
         class="settings-column"
         :class="{ collapsed: settingsCollapsed }"
       >
-        <button
-          class="settings-toggle"
-          :title="settingsCollapsed ? '展开设定资料库' : '收起设定资料库'"
-          :aria-label="settingsCollapsed ? '展开设定资料库' : '收起设定资料库'"
-          @click="toggleSettings"
-        >
+        <div class="settings-column-head">
+          <span v-if="!settingsCollapsed" class="settings-column-title"
+            >设定</span
+          >
+          <button
+            class="settings-toggle"
+            :title="settingsCollapsed ? '展开设定资料库' : '收起设定资料库'"
+            :aria-label="settingsCollapsed ? '展开设定资料库' : '收起设定资料库'"
+            @click="toggleSettings"
+          >
           <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
             <path
               d="M15 18l-6-6 6-6"
@@ -627,7 +633,8 @@ function onReorder(ids: number[]) {
               stroke-linejoin="round"
             />
           </svg>
-        </button>
+          </button>
+        </div>
         <SettingsPanel
           v-if="!settingsCollapsed && bookId !== null"
           :book-id="bookId"
@@ -1011,11 +1018,28 @@ function onReorder(ids: number[]) {
   width: 40px;
 }
 
+.settings-column-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 44px;
+  padding: 0 10px 0 14px;
+}
+
+.settings-column.collapsed .settings-column-head {
+  justify-content: center;
+  padding: 0;
+}
+
+.settings-column-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #8a8577;
+}
+
 .settings-toggle {
-  position: absolute;
-  top: 10px;
-  left: 8px;
-  z-index: 5;
   display: inline-flex;
   align-items: center;
   justify-content: center;

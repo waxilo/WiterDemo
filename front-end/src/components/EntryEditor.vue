@@ -5,6 +5,8 @@ import type { Entry, EntryType } from "../types/writer";
 import { ENTRY_TYPE_LABELS } from "../types/writer";
 import { useConfirm } from "../composables/useConfirm";
 import { showToast } from "../composables/useToast";
+import { useBusy } from "../composables/useBusy";
+import LoadingIndicator from "./LoadingIndicator.vue";
 
 /**
  * 设定条目编辑器（表单核心）：标题 + 内容 + 防抖自动保存 + 删除。
@@ -23,6 +25,7 @@ const confirm = useConfirm();
 const entry = ref<Entry | null>(null);
 const loading = ref(true);
 const saveState = ref<"saved" | "saving" | "dirty">("saved");
+const { busy: deleting, run: runDelete } = useBusy();
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
 onMounted(async () => {
@@ -93,13 +96,13 @@ async function onRemove(): Promise<void> {
     clearTimeout(saveTimer);
     saveTimer = null;
   }
-  try {
+  await runDelete(async () => {
     await writerApi.deleteEntry(props.entryId);
     emit("deleted");
     emit("close");
-  } catch (error) {
+  }).catch((error) => {
     showToast(error instanceof Error ? error.message : "删除失败", "error");
-  }
+  });
 }
 
 const saveStateText = computed(() => {
@@ -119,7 +122,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div v-if="loading" class="entry-loading">加载中…</div>
+  <div v-if="loading" class="entry-loading">
+    <LoadingIndicator text="加载中" />
+  </div>
   <template v-else-if="entry">
     <div class="entry-head">
       <span class="entry-type-badge" :class="entry.type">{{
@@ -129,7 +134,9 @@ onBeforeUnmount(() => {
         <span class="entry-save-state" :class="saveState">{{
           saveStateText
         }}</span>
-        <button class="entry-delete" @click="onRemove">删除</button>
+        <button class="entry-delete" :disabled="deleting" @click="onRemove">
+          {{ deleting ? "删除中…" : "删除" }}
+        </button>
       </div>
     </div>
     <input

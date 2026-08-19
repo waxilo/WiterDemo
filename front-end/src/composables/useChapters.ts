@@ -5,6 +5,7 @@ import { syncRequest, ApiClientError } from "../api/http";
 import type { Chapter, ChapterSummary } from "../types/chapter";
 import { AUTOSAVE_IDLE_MS } from "../config";
 import { getTextStats } from "../utils/textStats";
+import { useBusy } from "./useBusy";
 
 /** Client-side dirty marker: md5 of the JSON {title, content}. */
 function hashOf(title: string, content: string): string {
@@ -37,6 +38,8 @@ export function useChapters() {
   /** Message of the last failed save (cleared on the next successful save). */
   const saveError = ref<string | null>(null);
   const savedHash = ref<string | null>(null);
+  /** 章节级操作等待态（打开/新建），驱动左侧列表的等待覆盖层。 */
+  const { busy: selecting, run: runChapterOp } = useBusy();
 
   let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
   let saveQueued = false;
@@ -99,19 +102,24 @@ export function useChapters() {
 
   async function select(id: number): Promise<void> {
     if (current.value?.id === id) return;
-    await flush();
-    const chapter = await chapterApi.getChapter(id);
-    current.value = chapter;
-    // Seed savedHash from the loaded content so it starts "clean".
-    savedHash.value = hashOf(chapter.title, chapter.content);
+    // runChapterOp 在操作进行中自动忽略（防连点竞态）。
+    await runChapterOp(async () => {
+      await flush();
+      const chapter = await chapterApi.getChapter(id);
+      current.value = chapter;
+      // Seed savedHash from the loaded content so it starts "clean".
+      savedHash.value = hashOf(chapter.title, chapter.content);
+    });
   }
 
   async function create(bookId: number): Promise<void> {
-    await flush();
-    const chapter = await chapterApi.createChapter(bookId);
-    list.value.push(toSummary(chapter));
-    current.value = chapter;
-    savedHash.value = hashOf(chapter.title, chapter.content);
+    await runChapterOp(async () => {
+      await flush();
+      const chapter = await chapterApi.createChapter(bookId);
+      list.value.push(toSummary(chapter));
+      current.value = chapter;
+      savedHash.value = hashOf(chapter.title, chapter.content);
+    });
   }
 
   async function save(): Promise<void> {
@@ -334,6 +342,7 @@ export function useChapters() {
     saving,
     dirty,
     saveError,
+    selecting,
     loadList,
     select,
     create,

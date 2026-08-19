@@ -138,6 +138,7 @@ async function onReplaceChapter(): Promise<void> {
   });
   if (!ok) return;
 
+  replacing.value = true;
   chapter.content = chapter.content.split(q).join(replaceTo.value);
   emit("reload-editor");
   try {
@@ -145,6 +146,8 @@ async function onReplaceChapter(): Promise<void> {
     showToast(`已替换本章 ${count} 处`, "success");
   } catch (error) {
     showToast(error instanceof Error ? error.message : "保存失败", "error");
+  } finally {
+    replacing.value = false;
   }
 }
 

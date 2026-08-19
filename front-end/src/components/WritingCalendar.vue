@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from "vue";
 import * as writerApi from "../api/writer";
 import { formatCount } from "../utils/textStats";
+import LoadingIndicator from "./LoadingIndicator.vue";
 
 /**
  * 写作日历热力图（GitHub 风格）：最近 365 天每日写作字数。
@@ -103,7 +104,9 @@ function fmtDay(cell: DayCell): string {
       </div>
     </div>
 
-    <div v-if="loading" class="calendar-loading">加载中…</div>
+    <div v-if="loading" class="calendar-loading">
+      <LoadingIndicator text="加载中" />
+    </div>
     <div v-else class="calendar-wrap">
       <div class="calendar-months">
         <span

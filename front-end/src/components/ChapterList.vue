@@ -3,6 +3,7 @@ import { nextTick, onMounted, onUnmounted, ref, watch, computed } from "vue";
 import type { ChapterSummary } from "../types/chapter";
 import type { Volume } from "../types/writer";
 import { formatCount } from "../utils/textStats";
+import LoadingIndicator from "./LoadingIndicator.vue";
 
 const MOBILE_BREAKPOINT = "(max-width: 760px)";
 const CONTEXT_MENU_WIDTH = 168;
@@ -16,6 +17,8 @@ const props = defineProps<{
   currentId: number | null;
   currentWordCount: number;
   loading: boolean;
+  /** 章节级操作（打开/新建）进行中，显示等待覆盖层。 */
+  busy?: boolean;
 }>();
 const emit = defineEmits<{
   (e: "select", id: number): void;
@@ -600,8 +603,8 @@ function finishDrag() {
       </template>
     </nav>
 
-    <div v-if="!isCollapsed && loading" class="loading">
-      <span class="spinner"></span>
+    <div v-if="!isCollapsed && (loading || busy)" class="loading">
+      <LoadingIndicator />
     </div>
   </aside>
 
@@ -1097,21 +1100,6 @@ function finishDrag() {
   justify-content: center;
   background: rgba(250, 248, 243, 0.55);
   backdrop-filter: blur(1px);
-}
-
-.spinner {
-  width: 20px;
-  height: 20px;
-  border: 2px solid rgba(79, 110, 247, 0.25);
-  border-top-color: #4f6ef7;
-  border-radius: 50%;
-  animation: spin 0.7s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 @media (max-width: 760px) {

@@ -58,6 +58,7 @@ export function cancelProactiveRefresh(): void {
 
 /** Perform the actual /refresh call with a specific token. Returns true on success. */
 async function refreshWith(refreshToken: string, isRetry: boolean): Promise<boolean> {
+  markRequestStart();
   try {
     const res = await fetchWithTimeout(resolveUrl("/refresh"), {
       method: "POST",
@@ -95,6 +96,8 @@ async function refreshWith(refreshToken: string, isRetry: boolean): Promise<bool
     // Network error / timeout: keep the session and let the next attempt retry
     // (a bad network must not kick the user to the login page).
     return false;
+  } finally {
+    markRequestEnd();
   }
 }
 
@@ -162,6 +165,33 @@ export function scheduleProactiveRefresh(): void {
   proactiveTimer = setTimeout(runProactiveRefresh, delay);
 }
 
+// --- global pending-request indicator ----------------------------------------
+
+let pendingRequests = 0;
+const pendingListeners = new Set<(active: boolean) => void>();
+
+function emitPending(): void {
+  const active = pendingRequests > 0;
+  for (const listener of pendingListeners) listener(active);
+}
+
+function markRequestStart(): void {
+  pendingRequests++;
+  emitPending();
+}
+
+function markRequestEnd(): void {
+  pendingRequests = Math.max(0, pendingRequests - 1);
+  emitPending();
+}
+
+/** 订阅"是否有请求在途"，驱动全局顶部进度条。返回取消订阅函数。 */
+export function onPendingChange(listener: (active: boolean) => void): () => void {
+  pendingListeners.add(listener);
+  listener(pendingRequests > 0);
+  return () => pendingListeners.delete(listener);
+}
+
 // --- request -----------------------------------------------------------------
 
 const REQUEST_TIMEOUT_MS = 20_000;
@@ -214,6 +244,18 @@ function buildInit(
 export async function request<T>(
   path: string,
   options: RequestOptions = {}
+): Promise<T> {
+  markRequestStart();
+  try {
+    return await doRequest<T>(path, options);
+  } finally {
+    markRequestEnd();
+  }
+}
+
+async function doRequest<T>(
+  path: string,
+  options: RequestOptions
 ): Promise<T> {
   const { method = "GET", body, headers, skipAuthRefresh = false } = options;
   const url = resolveUrl(path);
