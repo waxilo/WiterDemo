@@ -59,7 +59,11 @@ async function persist(): Promise<void> {
       title: current.title,
       content: current.content,
     });
-    entry.value = saved;
+    // 字段级同步（不替换对象，避免输入框 v-model 重新绑定）。
+    if (entry.value) {
+      entry.value.title = saved.title;
+      entry.value.content = saved.content;
+    }
     saveState.value = "saved";
     emit("saved", saved);
   } catch (error) {
@@ -84,6 +88,11 @@ async function onRemove(): Promise<void> {
     confirmText: "删除",
   });
   if (!ok) return;
+  // 取消挂起的自动保存：删除后卸载时的 persist 会对已删除条目报 404。
+  if (saveTimer !== null) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
   try {
     await writerApi.deleteEntry(props.entryId);
     emit("deleted");

@@ -12,8 +12,8 @@ import EntryEditDialog from "./EntryEditDialog.vue";
  */
 const props = defineProps<{ bookId: number }>();
 
-type Filter = "all" | EntryType;
-const filter = ref<Filter>("all");
+type Filter = EntryType;
+const filter = ref<Filter>("character");
 const entries = ref<Entry[]>([]);
 const loading = ref(false);
 const editingId = ref<number | null>(null);
@@ -21,10 +21,7 @@ const editingId = ref<number | null>(null);
 async function loadList(): Promise<void> {
   loading.value = true;
   try {
-    entries.value = await writerApi.listEntries(
-      props.bookId,
-      filter.value === "all" ? undefined : filter.value
-    );
+    entries.value = await writerApi.listEntries(props.bookId, filter.value);
   } catch (error) {
     showToast(error instanceof Error ? error.message : "加载设定失败", "error");
   } finally {
@@ -36,8 +33,7 @@ watch(filter, () => void loadList());
 onMounted(() => void loadList());
 
 async function onCreate(): Promise<void> {
-  const type: EntryType =
-    filter.value === "all" ? "character" : filter.value;
+  const type: EntryType = filter.value;
   try {
     const entry = await writerApi.createEntry(props.bookId, type);
     entries.value.push(entry);
@@ -47,15 +43,19 @@ async function onCreate(): Promise<void> {
   }
 }
 
-function onEdited(result: Entry | "deleted" | null): void {
+/** 保存成功：仅同步列表项，不关闭弹窗。 */
+function onSaved(saved: Entry): void {
+  const index = entries.value.findIndex((e) => e.id === saved.id);
+  if (index !== -1) entries.value[index] = saved;
+  else entries.value.push(saved);
+}
+
+/** 关闭/删除：关闭弹窗；删除时同步移除列表项。 */
+function onEditedClose(deleted: boolean): void {
   const id = editingId.value;
   editingId.value = null;
-  if (result === "deleted") {
-    if (id !== null) entries.value = entries.value.filter((e) => e.id !== id);
-  } else if (result) {
-    const index = entries.value.findIndex((e) => e.id === result.id);
-    if (index !== -1) entries.value[index] = result;
-    else entries.value.push(result);
+  if (deleted && id !== null) {
+    entries.value = entries.value.filter((e) => e.id !== id);
   }
 }
 </script>
@@ -64,24 +64,18 @@ function onEdited(result: Entry | "deleted" | null): void {
   <div class="settings">
     <div class="settings-tabs">
       <button
-        v-for="tab in (['all', 'character', 'location', 'concept'] as const)"
+        v-for="tab in (['character', 'location', 'concept'] as const)"
         :key="tab"
         class="settings-tab"
         :class="{ active: filter === tab }"
         @click="filter = tab"
       >
-        {{ tab === "all" ? "全部" : ENTRY_TYPE_LABELS[tab] }}
+        {{ ENTRY_TYPE_LABELS[tab] }}
       </button>
     </div>
 
     <div class="settings-list-head">
-      <span class="settings-label">
-        {{
-          filter === "all"
-            ? "设定资料库"
-            : ENTRY_TYPE_LABELS[filter as EntryType]
-        }}
-      </span>
+      <span class="settings-label">{{ ENTRY_TYPE_LABELS[filter] }}</span>
       <button
         class="settings-add"
         title="新建条目"
@@ -101,7 +95,7 @@ function onEdited(result: Entry | "deleted" | null): void {
     </div>
 
     <p v-if="!loading && entries.length === 0" class="settings-empty">
-      还没有条目，点击下方新建
+      还没有条目，点击右上角 + 新建
     </p>
     <nav v-else class="settings-list">
       <button
@@ -118,16 +112,12 @@ function onEdited(result: Entry | "deleted" | null): void {
       </button>
     </nav>
 
-    <button class="settings-create" @click="onCreate">
-      ＋ 新建设定
-    </button>
-
     <EntryEditDialog
       v-if="editingId !== null"
       :entry-id="editingId"
-      @close="onEdited(null)"
-      @saved="onEdited"
-      @deleted="onEdited('deleted')"
+      @close="onEditedClose(false)"
+      @saved="onSaved"
+      @deleted="onEditedClose(true)"
     />
   </div>
 </template>
@@ -204,25 +194,6 @@ function onEdited(result: Entry | "deleted" | null): void {
   margin: 10px 14px;
   font-size: 12px;
   color: #b6b0a1;
-}
-
-.settings-create {
-  flex-shrink: 0;
-  margin: 4px 10px 12px;
-  padding: 9px 0;
-  font-size: 13px;
-  color: #8a8577;
-  background: transparent;
-  border: 1px dashed #d8d2c4;
-  border-radius: 9px;
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-}
-
-.settings-create:hover {
-  background: #f0eee7;
-  color: #444;
-  border-color: #c4bcaa;
 }
 
 .settings-list {

@@ -283,19 +283,6 @@ function onOutlineJump(index: number) {
   editorRef.value?.locateHeading(index);
 }
 
-/** 全书大纲：切换章节并在该章内定位到目标标题。 */
-async function onOutlineJumpChapter(chapterId: number, headingIndex: number) {
-  try {
-    await props.chapters.select(chapterId);
-    await nextTick();
-    setTimeout(() => {
-      editorRef.value?.locateHeading(headingIndex);
-    }, 0);
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : "切换章节失败", "error");
-  }
-}
-
 // --- navigation --------------------------------------------------------------
 onMounted(() => {
   if (bookId.value !== null) void props.chapters.loadList(bookId.value);
@@ -577,12 +564,10 @@ function onReorder(ids: number[]) {
         />
         <div v-else class="left-outline">
           <OutlinePanel
-            v-if="current && bookId !== null"
+            v-if="current"
             :chapters="chapters"
-            :book-id="bookId"
             :active-index="outlineActiveIndex"
             @jump="onOutlineJump"
-            @jump-chapter="onOutlineJumpChapter"
           />
         </div>
       </aside>

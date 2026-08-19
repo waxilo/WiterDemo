@@ -49,18 +49,6 @@ export interface OutlineHeading {
   text: string;
 }
 
-/** One chapter's heading hierarchy (book-wide outline). */
-export interface BookOutlineChapter {
-  id: number;
-  title: string;
-  headings: OutlineHeading[];
-}
-
-/** Book-wide outline response. */
-export interface BookOutline {
-  chapters: BookOutlineChapter[];
-}
-
 /**
  * Payload for saving a chapter. `baseVersion` is the version the client
  * loaded; the server conditions the write on it and refuses (409) if it no
