@@ -5,20 +5,18 @@ WriterDemo 写作助手 MCP server：让外部 AI（Claude Desktop、Cursor、Cl
 创建人物/地点/设定条目、修改章节内容、全书搜索等。数据与网页端完全一致
 （同一套 Cloudflare API）。
 
-## 使用（免安装，自动更新）
-
-**安装和更新是同一个命令**——`npx` 每次运行自动检查并拉取 npm 最新版：
+## 安装（全局，推荐）
 
 ```bash
-npx -y writer-demo-mcp          # 首次拉取最新版并启动
-npx -y writer-demo-mcp login    # 登录（凭证存 ~/.writer-mcp.json，600 权限）
+npm install -g writer-demo-mcp
+writer-demo-mcp login     # 登录（凭证存 ~/.writer-mcp.json，600 权限）
 ```
 
-以后发布新版本无需任何升级操作，下次运行自动使用最新版。
+- **更新到最新版**：`npm install -g writer-demo-mcp@latest`（与安装同一个命令）
+- server 启动时会自动检查 npm 最新版，落后时在终端提示更新命令
+- 安装只需成功一次，之后运行不依赖网络
 
-> **全局安装方式**（可选）：`npm install -g writer-demo-mcp`
-> 更新全局包用同一个命令：`npm install -g writer-demo-mcp@latest`
-> server 启动时会自动检查 npm 最新版，落后时在终端提示更新命令。
+> **npx 方式**（可选，需每次访问 registry）：`npx -y writer-demo-mcp`——网络受限环境请用全局安装。
 
 > 环境变量可覆盖：`WRITER_MCP_CONFIG`（凭证路径）、`WRITER_API_BASE`（API 地址）。
 
