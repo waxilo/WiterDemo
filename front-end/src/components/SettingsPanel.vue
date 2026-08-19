@@ -68,8 +68,13 @@ async function onCreate(): Promise<void> {
 /** 保存成功：仅同步列表项，不关闭弹窗。 */
 function onSaved(saved: Entry): void {
   const index = entries.value.findIndex((e) => e.id === saved.id);
-  if (index !== -1) entries.value[index] = saved;
-  else entries.value.push(saved);
+  if (index !== -1) {
+    entries.value[index] = saved;
+  } else if (saved.type === filter.value) {
+    // 仅当类型匹配当前列表才插入：切换类型时卸载 flush 的保存响应
+    // 属于上一类型，插入会污染当前列表。
+    entries.value.push(saved);
+  }
 }
 
 /** 关闭/删除：关闭弹窗；删除时同步移除列表项。 */

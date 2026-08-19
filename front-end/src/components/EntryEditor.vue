@@ -29,6 +29,13 @@ const { busy: deleting, run: runDelete } = useBusy();
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 /** 加载序号：丢弃过期响应（快速切换条目时防串写）。 */
 let loadSeq = 0;
+/** 保存序号：丢弃过期响应（并发保存时旧响应不得回退新响应设置的状态）。 */
+let saveSeq = 0;
+/** 删除进行中：在途保存的 404 属预期，不再弹错误。 */
+let removing = false;
+/** 串行化：同一时间只有一个保存请求在途，避免并发写乱序覆盖服务器值。 */
+let persistInFlight = false;
+let persistQueued = false;
 
 async function loadEntry(id: number): Promise<void> {
   const seq = ++loadSeq;
@@ -64,9 +71,12 @@ watch(
   }
 );
 
-/** 用户输入（@input 驱动）：标记待保存并防抖落盘。 */
-function onUserInput(): void {
+/** 用户输入（@input 驱动）：标记待保存并防抖落盘。IME 组合中不触发。 */
+function onUserInput(e: Event): void {
   if (!entry.value) return;
+  // 中文输入法组合中（未确认），不触发保存；compositionend 后会再发一次
+  // input 事件（isComposing=false）补上。
+  if ((e as InputEvent).isComposing) return;
   saveState.value = "dirty";
   if (saveTimer !== null) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
@@ -77,26 +87,58 @@ function onUserInput(): void {
 async function persist(): Promise<void> {
   const current = entry.value;
   if (!current) return;
+  if (persistInFlight) {
+    // 已有保存在途：标记排队，完成后由 finally 续存最新内容
+    // （并发写可能乱序到达服务器，旧值会覆盖新值）。
+    persistQueued = true;
+    return;
+  }
   saveTimer = null;
+  persistInFlight = true;
   saveState.value = "saving";
+  // 发送快照：响应返回时仅当用户未继续修改才写回服务器回显，
+  // 防止慢请求把正在输入的内容回滚成旧值。
+  const snapshot = { title: current.title, content: current.content };
+  const seq = ++saveSeq;
   try {
     const saved = await writerApi.updateEntry(current.id, {
       title: current.title,
       content: current.content,
     });
-    // 字段级同步（不替换对象，避免输入框重新绑定）。
+    // 已有更新的保存请求：旧响应不得覆盖新响应的状态/内容。
+    if (seq !== saveSeq) return;
     // 守卫 id：切换条目后旧保存响应不得覆盖新条目。
     if (entry.value && entry.value.id === current.id) {
-      entry.value.title = saved.title;
-      entry.value.content = saved.content;
-      saveState.value = "saved";
+      if (
+        entry.value.title === snapshot.title &&
+        entry.value.content === snapshot.content
+      ) {
+        // 用户未继续修改：同步服务器回显（trim 等规范化）+ 标记已保存。
+        entry.value.title = saved.title;
+        entry.value.content = saved.content;
+        saveState.value = "saved";
+        emit("saved", saved);
+      } else {
+        // 用户已继续输入：不覆盖，保持待保存；队列会再次保存新内容。
+        saveState.value = "dirty";
+        // 通知父级时带上最新本地值，避免列表标题被慢响应回退成旧值。
+        emit("saved", { ...saved, title: entry.value.title, content: entry.value.content });
+      }
     }
-    emit("saved", saved);
   } catch (error) {
+    // 删除进行中：条目已不存在，404 属预期，不打扰用户。
+    if (removing) return;
+    if (seq !== saveSeq) return;
     if (entry.value && entry.value.id === current.id) {
       saveState.value = "dirty";
     }
     showToast(error instanceof Error ? error.message : "保存失败", "error");
+  } finally {
+    persistInFlight = false;
+    if (persistQueued) {
+      persistQueued = false;
+      void persist(); // 续存排队期间的最新修改
+    }
   }
 }
 
@@ -122,6 +164,8 @@ async function onRemove(): Promise<void> {
     clearTimeout(saveTimer);
     saveTimer = null;
   }
+  // 在途保存的 404 属预期（条目即将不存在），不弹错误。
+  removing = true;
   await runDelete(async () => {
     await writerApi.deleteEntry(props.entryId);
     emit("deleted");
@@ -171,14 +215,14 @@ onBeforeUnmount(() => {
       placeholder="未命名条目"
       aria-label="条目标题"
       spellcheck="false"
-      @input="entry.title = ($event.target as HTMLInputElement).value; onUserInput()"
+      @input="entry.title = ($event.target as HTMLInputElement).value; onUserInput($event)"
     />
     <textarea
       :value="entry.content"
       class="entry-content"
       placeholder="记录这个设定的一切……"
       spellcheck="false"
-      @input="entry.content = ($event.target as HTMLTextAreaElement).value; onUserInput()"
+      @input="entry.content = ($event.target as HTMLTextAreaElement).value; onUserInput($event)"
     ></textarea>
     <div class="entry-actions">
       <button class="entry-close" @click="onDone">完成</button>
