@@ -2,6 +2,7 @@ import * as entryService from "../service/EntryService";
 import { jsonResponse } from "../response";
 import {
   assertId,
+  assertIdList,
   assertOptionalString,
   assertString,
 } from "../utils/validate";
@@ -78,4 +79,22 @@ export async function deleteEntry(ctx: Ctx): Promise<Response> {
     assertId(ctx.params.id, "条目 id")
   );
   return jsonResponse(result);
+}
+
+interface ReorderBody {
+  type?: string;
+  ids?: number[];
+}
+
+/** Reorder entries of one type by id sequence. */
+export async function reorderEntries(ctx: Ctx): Promise<Response> {
+  const body = await ctx.json<ReorderBody>().catch(() => ({} as ReorderBody));
+  const entries = await entryService.reorderEntries(
+    ctx.env,
+    ctx.userId,
+    assertId(ctx.params.bookId, "书籍 id"),
+    assertString(body.type ?? "", "条目类型", 20, 1),
+    assertIdList(body.ids, "条目排序")
+  );
+  return jsonResponse(entries);
 }

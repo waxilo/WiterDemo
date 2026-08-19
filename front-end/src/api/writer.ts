@@ -100,3 +100,15 @@ export function updateEntry(
 export function deleteEntry(id: number): Promise<{ id: number }> {
   return request<{ id: number }>(`/entries/${id}`, { method: "DELETE" });
 }
+
+/** Reorder entries of one type by id sequence (returns the new ordered list). */
+export function reorderEntries(
+  bookId: number,
+  type: EntryType,
+  ids: number[]
+): Promise<Entry[]> {
+  return request<Entry[]>(`/books/${bookId}/entries`, {
+    method: "PUT",
+    body: { type, ids },
+  });
+}

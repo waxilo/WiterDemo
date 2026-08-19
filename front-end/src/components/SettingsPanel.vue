@@ -81,6 +81,27 @@ function onEditedClose(deleted: boolean): void {
   }
 }
 
+/** 拖拽排序：按 id 序列重排（乐观），再持久化；失败回滚为服务器顺序。 */
+async function onReorder(ids: number[]): Promise<void> {
+  const byId = new Map(entries.value.map((e) => [e.id, e]));
+  const next = ids
+    .map((id) => byId.get(id))
+    .filter((e): e is Entry => e !== undefined);
+  // 列表在拖拽期间已被刷新（长度不匹配）→ 放弃本次重排。
+  if (next.length !== entries.value.length) return;
+  entries.value = next;
+  try {
+    await writerApi.reorderEntries(
+      props.bookId,
+      filter.value,
+      next.map((e) => e.id)
+    );
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "排序保存失败", "error");
+    void loadList();
+  }
+}
+
 /** 退出全屏：同时清空编辑选中，避免退出后弹层从背后弹出。 */
 function closeExpanded(): void {
   expanded.value = false;
@@ -105,6 +126,7 @@ defineExpose({ expand });
         :editing-id="editingId"
         @update:filter="onFilterChange"
         @select="editingId = $event"
+        @reorder="onReorder"
       >
         <template #headActions>
           <button
@@ -160,6 +182,7 @@ defineExpose({ expand });
               :editing-id="editingId"
               @update:filter="onFilterChange"
               @select="editingId = $event"
+              @reorder="onReorder"
             />
           </aside>
 

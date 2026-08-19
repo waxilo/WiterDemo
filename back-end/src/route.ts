@@ -258,6 +258,7 @@ export async function router(ctx: Ctx): Promise<Response> {
       ctx.params.bookId = bookId;
       if (method === "GET") return entryController.listEntries(ctx);
       if (method === "POST") return afterWrite(entryController.createEntry(ctx));
+      if (method === "PUT") return afterWrite(entryController.reorderEntries(ctx));
       return jsonResponse(null, 404, "Not Found API");
     }
   }

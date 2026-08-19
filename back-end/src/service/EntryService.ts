@@ -117,3 +117,47 @@ export async function deleteEntry(
   await env.DB.prepare(`delete from t_entry where id = ?`).bind(entryId).run();
   return { id: entryId };
 }
+
+/**
+ * Reorder the entries of a given type to match the id sequence. Verifies the
+ * user owns the book, that the sequence covers exactly the book's entries of
+ * that type (no duplicates, no omissions), then writes each entry's
+ * sort_order to its index.
+ */
+export async function reorderEntries(
+  env: Env,
+  userId: number,
+  bookId: number,
+  type: string,
+  ids: number[]
+): Promise<Entry[]> {
+  const book = await getOwnedBook(env, userId, bookId);
+  if (!book) throw new ApiError(403, "无权操作");
+  const entryType = assertType(type);
+
+  const { results } = await env.DB.prepare(
+    `select id from t_entry where book_id = ? and type = ?`
+  )
+    .bind(bookId, entryType)
+    .all<{ id: number }>();
+  const owned = new Set(results.map((r) => r.id));
+
+  if (new Set(ids).size !== ids.length || ids.length !== owned.size) {
+    throw new ApiError(400, "排序列表不合法");
+  }
+  for (const id of ids) {
+    if (!owned.has(id)) throw new ApiError(400, "条目不属于该书");
+  }
+
+  const statements = ids.map((id, index) =>
+    env.DB.prepare(
+      `update t_entry set sort_order = ? where id = ? and book_id = ? and type = ?`
+    ).bind(index, id, bookId, entryType)
+  );
+  const BATCH_LIMIT = 100; // D1 hard cap per batch call
+  for (let i = 0; i < statements.length; i += BATCH_LIMIT) {
+    await env.DB.batch(statements.slice(i, i + BATCH_LIMIT));
+  }
+
+  return listEntries(env, userId, bookId, entryType);
+}
