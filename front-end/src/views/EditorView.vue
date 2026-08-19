@@ -5,8 +5,14 @@ import type { useChapters } from "../composables/useChapters";
 import ChapterList from "../components/ChapterList.vue";
 import ChapterEditor from "../components/ChapterEditor.vue";
 import FindReplacePanel from "../components/FindReplacePanel.vue";
+import OutlinePanel from "../components/OutlinePanel.vue";
+import HistoryDialog from "../components/HistoryDialog.vue";
+import SettingsView from "../components/SettingsView.vue";
 import { useConfirm } from "../composables/useConfirm";
 import { showToast } from "../composables/useToast";
+import * as writerApi from "../api/writer";
+import * as chapterApi from "../api/chapter";
+import type { Volume } from "../types/writer";
 import { formatCount, getTextStats } from "../utils/textStats";
 
 const confirm = useConfirm();
@@ -88,22 +94,6 @@ const currentChapterNumber = computed(() => {
 
 const currentChapterLabel = computed(() =>
   currentChapterNumber.value === null ? "" : `第${currentChapterNumber.value}章`
-);
-
-const overallStats = computed(() =>
-  list.value.reduce(
-    (total, chapter) => {
-      const isCurrent = chapter.id === current.value?.id;
-      total.wordCount += isCurrent
-        ? currentStats.value.wordCount
-        : chapter.wordCount ?? 0;
-      total.charCount += isCurrent
-        ? currentStats.value.charCount
-        : chapter.charCount ?? 0;
-      return total;
-    },
-    { wordCount: 0, charCount: 0 }
-  )
 );
 
 const now = ref(Date.now());
@@ -208,9 +198,105 @@ async function onOpenAndLocate(chapterId: number, keyword: string) {
   }
 }
 
+// --- left-pane mode: chapters | settings library ----------------------------
+const leftMode = ref<"chapters" | "entries">("chapters");
+
+function onSetMode(mode: "chapters" | "entries") {
+  leftMode.value = mode;
+}
+
+// --- version history ----------------------------------------------------------
+const historyChapterId = ref<number | null>(null);
+
+function onChapterHistory(id: number) {
+  historyChapterId.value = id;
+}
+
+/** 恢复历史版本后，重新加载当前章节内容。 */
+async function onHistoryRestored(): Promise<void> {
+  if (current.value === null) return;
+  try {
+    const fresh = await chapterApi.getChapter(current.value.id);
+    props.chapters.applyServerChapter(fresh);
+    editorRef.value?.reloadFromModel();
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "刷新章节失败", "error");
+  }
+}
+
+// --- outline (right-side chapter navigation) --------------------------------
+const OUTLINE_KEY = "writer_outline_collapsed";
+const outlineCollapsed = ref(localStorage.getItem(OUTLINE_KEY) === "1");
+const outlineActiveIndex = ref(-1);
+let outlineScrollTimer: ReturnType<typeof setTimeout> | null = null;
+let outlineScrollEl: HTMLElement | null = null;
+
+function toggleOutline() {
+  outlineCollapsed.value = !outlineCollapsed.value;
+  localStorage.setItem(OUTLINE_KEY, outlineCollapsed.value ? "1" : "0");
+}
+
+function onOutlineScroll(): void {
+  if (outlineScrollTimer !== null) clearTimeout(outlineScrollTimer);
+  outlineScrollTimer = setTimeout(() => {
+    outlineActiveIndex.value =
+      editorRef.value?.getActiveHeadingIndex() ?? -1;
+  }, 80);
+}
+
+function attachOutlineScroll(): void {
+  detachOutlineScroll();
+  const scrollEl = editorRef.value?.getScrollContainer() ?? null;
+  if (scrollEl) {
+    outlineScrollEl = scrollEl;
+    scrollEl.addEventListener("scroll", onOutlineScroll, { passive: true });
+  }
+}
+
+function detachOutlineScroll(): void {
+  if (outlineScrollEl) {
+    outlineScrollEl.removeEventListener("scroll", onOutlineScroll);
+    outlineScrollEl = null;
+  }
+  if (outlineScrollTimer !== null) {
+    clearTimeout(outlineScrollTimer);
+    outlineScrollTimer = null;
+  }
+}
+
+// 章节切换后重新绑定滚动监听。
+watch(
+  () => current.value?.id,
+  () => {
+    void nextTick(() => {
+      attachOutlineScroll();
+      outlineActiveIndex.value = editorRef.value?.getActiveHeadingIndex() ?? -1;
+    });
+  },
+  { immediate: true }
+);
+
+function onOutlineJump(index: number) {
+  editorRef.value?.locateHeading(index);
+}
+
+/** 全书大纲：切换章节并在该章内定位到目标标题。 */
+async function onOutlineJumpChapter(chapterId: number, headingIndex: number) {
+  try {
+    await props.chapters.select(chapterId);
+    await nextTick();
+    setTimeout(() => {
+      editorRef.value?.locateHeading(headingIndex);
+    }, 0);
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "切换章节失败", "error");
+  }
+}
+
 // --- navigation --------------------------------------------------------------
 onMounted(() => {
   if (bookId.value !== null) void props.chapters.loadList(bookId.value);
+  void loadVolumes();
   window.addEventListener("keydown", onGlobalKeydown);
   relativeTimeTimer = setInterval(() => {
     now.value = Date.now();
@@ -220,6 +306,7 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener("keydown", onGlobalKeydown);
   if (relativeTimeTimer !== null) clearInterval(relativeTimeTimer);
+  detachOutlineScroll();
 });
 
 function onGlobalKeydown(e: KeyboardEvent) {
@@ -255,6 +342,65 @@ async function onCreate() {
     if (bookId.value !== null) await create(bookId.value);
   } catch (error) {
     showToast(error instanceof Error ? error.message : "创建失败", "error");
+  }
+}
+
+// --- volumes -----------------------------------------------------------------
+const volumes = ref<Volume[]>([]);
+
+async function loadVolumes() {
+  if (bookId.value === null) return;
+  try {
+    volumes.value = await writerApi.listVolumes(bookId.value);
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "加载卷失败", "error");
+  }
+}
+
+async function onCreateVolume() {
+  if (bookId.value === null) return;
+  try {
+    await writerApi.createVolume(bookId.value);
+    await loadVolumes();
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "新建卷失败", "error");
+  }
+}
+
+async function onRenameVolume(id: number, title: string) {
+  try {
+    await writerApi.renameVolume(id, title);
+    await loadVolumes();
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "重命名卷失败", "error");
+  }
+}
+
+async function onDeleteVolume(id: number) {
+  const ok = await confirm({
+    title: "删除卷？",
+    message: "卷内章节将保留（变为未分卷），卷本身删除。",
+    confirmText: "删除",
+  });
+  if (!ok) return;
+  try {
+    await writerApi.deleteVolume(id);
+    await loadVolumes();
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "删除卷失败", "error");
+  }
+}
+
+async function onMoveChapter(id: number, volumeId: number | null) {
+  try {
+    await writerApi.moveChapterToVolume(id, volumeId);
+    // 同步本地列表的 volumeId，并刷新卷计数。
+    const item = list.value.find((c) => c.id === id);
+    if (item) item.volumeId = volumeId;
+    if (current.value?.id === id) current.value.volumeId = volumeId;
+    await loadVolumes();
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "移动章节失败", "error");
   }
 }
 
@@ -390,16 +536,25 @@ function onReorder(ids: number[]) {
     <div v-if="menuOpen" class="menu-backdrop" @click="closeMenu"></div>
 
     <div class="panes">
+      <template v-if="leftMode === 'chapters'">
       <ChapterList
         :chapters="list"
+        :volumes="volumes"
         :current-id="current?.id ?? null"
         :current-word-count="currentStats.wordCount"
         :loading="loading"
+        :mode="leftMode"
+        @set-mode="onSetMode"
         @select="onSelect"
         @create="onCreate"
+        @create-volume="onCreateVolume"
+        @rename-volume="onRenameVolume"
+        @delete-volume="onDeleteVolume"
+        @move-chapter="onMoveChapter"
         @remove="onRemove"
         @rename="onRename"
         @duplicate="onDuplicate"
+        @history="onChapterHistory"
         @reorder="onReorder"
       />
       <div class="editor-column">
@@ -414,13 +569,8 @@ function onReorder(ids: number[]) {
         />
         <ChapterEditor ref="editorRef" :chapters="chapters" />
         <footer class="writing-status">
-          <div class="status-overall">
-            全书 {{ list.length }} 章 ·
-            {{ formatCount(overallStats.wordCount) }} 字
-          </div>
           <div v-if="current" class="status-current">
-            <span>{{ currentChapterLabel }}</span>
-            <span>
+            <span>{{ currentChapterLabel }}</span>            <span>
               字数
               <Transition name="count" mode="out-in">
                 <b :key="currentStats.wordCount">
@@ -441,7 +591,49 @@ function onReorder(ids: number[]) {
           <div v-else class="status-current">选择章节后开始写作</div>
         </footer>
       </div>
+
+      <aside class="outline-column" :class="{ collapsed: outlineCollapsed }">
+        <button
+          class="outline-toggle"
+          :title="outlineCollapsed ? '展开章内导航' : '收起章内导航'"
+          :aria-label="outlineCollapsed ? '展开章内导航' : '收起章内导航'"
+          @click="toggleOutline"
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <path
+              d="M9 18l6-6-6-6"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
+        <OutlinePanel
+          v-if="!outlineCollapsed && current && bookId !== null"
+          :chapters="chapters"
+          :book-id="bookId"
+          :active-index="outlineActiveIndex"
+          @jump="onOutlineJump"
+          @jump-chapter="onOutlineJumpChapter"
+        />
+      </aside>
+      </template>
+
+      <SettingsView
+        v-else-if="bookId !== null"
+        :book-id="bookId"
+        @set-mode="onSetMode"
+      />
     </div>
+
+    <HistoryDialog
+      v-if="historyChapterId !== null"
+      :chapter-id="historyChapterId"
+      @close="historyChapterId = null"
+      @restored="onHistoryRestored"
+    />
   </div>
 </template>
 
@@ -737,6 +929,49 @@ function onReorder(ids: number[]) {
   flex-direction: column;
 }
 
+/* ---- right-side chapter outline ---- */
+.outline-column {
+  position: relative;
+  width: 224px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: #faf8f3;
+  border-left: 1px solid rgba(0, 0, 0, 0.06);
+  transition: width 0.24s ease;
+}
+
+.outline-column.collapsed {
+  width: 40px;
+}
+
+.outline-toggle {
+  position: absolute;
+  top: 10px;
+  left: 8px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  color: #8a8577;
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, transform 0.24s ease;
+}
+
+.outline-toggle:hover {
+  color: #444;
+  background: #f0efea;
+}
+
+.outline-column.collapsed .outline-toggle {
+  transform: rotate(180deg);
+}
+
 .writing-status b {
   display: inline-block;
   font-weight: 400;
@@ -937,7 +1172,6 @@ function onReorder(ids: number[]) {
   line-height: 1;
 }
 
-.status-overall,
 .status-current {
   display: flex;
   align-items: center;
@@ -1036,14 +1270,14 @@ function onReorder(ids: number[]) {
     font-size: 11px;
   }
 
-  .status-overall {
-    display: none;
-  }
-
   .status-current {
     width: 100%;
     justify-content: space-between;
     gap: 6px;
+  }
+
+  .outline-column {
+    display: none;
   }
 }
 

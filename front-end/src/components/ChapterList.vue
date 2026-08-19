@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted, ref, watch, computed } from "vue";
 import type { ChapterSummary } from "../types/chapter";
+import type { Volume } from "../types/writer";
 import { formatCount } from "../utils/textStats";
 
 const MOBILE_BREAKPOINT = "(max-width: 760px)";
@@ -11,16 +12,25 @@ const LONG_PRESS_MOVE_PX = 10;
 
 const props = defineProps<{
   chapters: ChapterSummary[];
+  volumes: Volume[];
   currentId: number | null;
   currentWordCount: number;
   loading: boolean;
+  /** 左侧栏模式：章节列表 or 设定资料库（由 EditorView 驱动）。 */
+  mode: "chapters" | "entries";
 }>();
 const emit = defineEmits<{
   (e: "select", id: number): void;
   (e: "create"): void;
+  (e: "create-volume"): void;
+  (e: "rename-volume", id: number, title: string): void;
+  (e: "delete-volume", id: number): void;
+  (e: "move-chapter", id: number, volumeId: number | null): void;
+  (e: "set-mode", mode: "chapters" | "entries"): void;
   (e: "remove", id: number): void;
   (e: "rename", id: number, title: string): void;
   (e: "duplicate", id: number): void;
+  (e: "history", id: number): void;
   (e: "reorder", ids: number[]): void;
 }>();
 
@@ -32,17 +42,75 @@ const overIndex = ref<number | null>(null);
 const mobileQuery = window.matchMedia(MOBILE_BREAKPOINT);
 const isCollapsed = ref(false);
 const editingId = ref<number | null>(null);
+const editingVolumeId = ref<number | null>(null);
 const titleDraft = ref("");
 const titleInput = ref<HTMLInputElement | null>(null);
+const volumeTitleInput = ref<HTMLInputElement | null>(null);
 const contextMenu = ref({
   isOpen: false,
   chapterId: null as number | null,
+  volumeId: null as number | null,
+  /** "main" | "move-volume": 章节菜单的子菜单态 */
+  mode: "main" as "main" | "move-volume",
   x: 0,
   y: 0,
 });
 const longPressTimer = ref<ReturnType<typeof setTimeout> | null>(null);
 const suppressNextClick = ref(false);
 let longPressStart: { x: number; y: number; chapterId: number } | null = null;
+
+/**
+ * Group the flat chapter list by volume for display. Ungrouped chapters form
+ * the first group. Ordering within a group follows the global sort order.
+ */
+const groupedItems = computed(() => {
+  const groups: {
+    key: string;
+    volume: Volume | null;
+    /** 未分卷组的显示标签（有卷时才显示）。 */
+    label: string | null;
+    items: ChapterSummary[];
+  }[] = [];
+  const ungrouped: ChapterSummary[] = [];
+  const byVolume = new Map<number, ChapterSummary[]>();
+  for (const chapter of items.value) {
+    if (chapter.volumeId === null || chapter.volumeId === undefined) {
+      ungrouped.push(chapter);
+    } else {
+      const list = byVolume.get(chapter.volumeId) ?? [];
+      list.push(chapter);
+      byVolume.set(chapter.volumeId, list);
+    }
+  }
+  if (ungrouped.length > 0) {
+    groups.push({
+      key: "ungrouped",
+      volume: null,
+      label: props.volumes.length > 0 ? "未分卷" : null,
+      items: ungrouped,
+    });
+  }
+  for (const volume of props.volumes) {
+    // Empty volumes stay visible (otherwise a new volume is invisible until
+    // a chapter is moved into it).
+    groups.push({
+      key: `v${volume.id}`,
+      volume,
+      label: null,
+      items: byVolume.get(volume.id) ?? [],
+    });
+  }
+  return groups;
+});
+
+/** 分组内 (groupIndex, index) → 扁平 items 索引（拖拽/高亮用）。 */
+function flatIndex(groupIndex: number, index: number): number {
+  let offset = 0;
+  for (let g = 0; g < groupIndex; g++) {
+    offset += groupedItems.value[g].items.length;
+  }
+  return offset + index;
+}
 
 watch(
   () => props.chapters,
@@ -113,6 +181,8 @@ function openMenuAt(
   contextMenu.value = {
     isOpen: true,
     chapterId: chapter.id,
+    volumeId: null,
+    mode: "main",
     x: Math.max(
       8,
       Math.min(clientX, window.innerWidth - CONTEXT_MENU_WIDTH - 8)
@@ -120,6 +190,25 @@ function openMenuAt(
     y: Math.max(
       8,
       Math.min(clientY, window.innerHeight - CONTEXT_MENU_HEIGHT - 8)
+    ),
+  };
+}
+
+/** 打开卷的右键菜单。 */
+function openVolumeMenu(volume: Volume, event: MouseEvent): void {
+  editingVolumeId.value = null;
+  contextMenu.value = {
+    isOpen: true,
+    chapterId: null,
+    volumeId: volume.id,
+    mode: "main",
+    x: Math.max(
+      8,
+      Math.min(event.clientX, window.innerWidth - CONTEXT_MENU_WIDTH - 8)
+    ),
+    y: Math.max(
+      8,
+      Math.min(event.clientY, window.innerHeight - CONTEXT_MENU_HEIGHT - 8)
     ),
   };
 }
@@ -200,6 +289,56 @@ function openContextMenu(chapter: ChapterSummary, event: MouseEvent): void {
 function closeContextMenu(): void {
   contextMenu.value.isOpen = false;
   contextMenu.value.chapterId = null;
+  contextMenu.value.volumeId = null;
+}
+
+// --- volume operations -------------------------------------------------------
+
+function startRenameVolume(volume: Volume): void {
+  closeContextMenu();
+  editingVolumeId.value = volume.id;
+  titleDraft.value = volume.title;
+  void nextTick(() => {
+    volumeTitleInput.value?.focus();
+    volumeTitleInput.value?.select();
+  });
+}
+
+function commitVolumeRename(): void {
+  const id = editingVolumeId.value;
+  if (id === null) return;
+  const volume = props.volumes.find((v) => v.id === id);
+  const title = titleDraft.value.trim() || "新卷";
+  editingVolumeId.value = null;
+  if (volume && volume.title !== title) emit("rename-volume", id, title);
+}
+
+function renameVolumeFromMenu(): void {
+  const volume = props.volumes.find((v) => v.id === contextMenu.value.volumeId);
+  if (volume) startRenameVolume(volume);
+}
+
+function deleteVolumeFromMenu(): void {
+  const id = contextMenu.value.volumeId;
+  closeContextMenu();
+  if (id !== null) emit("delete-volume", id);
+}
+
+/** 章节菜单 → "移动到卷" 子菜单。 */
+function openMoveVolumeMenu(): void {
+  contextMenu.value.mode = "move-volume";
+}
+
+function moveChapterToVolume(volumeId: number | null): void {
+  const id = contextMenu.value.chapterId;
+  closeContextMenu();
+  if (id !== null) emit("move-chapter", id, volumeId);
+}
+
+function historyFromMenu(): void {
+  const id = contextMenu.value.chapterId;
+  closeContextMenu();
+  if (id !== null) emit("history", id);
 }
 
 function renameFromMenu(): void {
@@ -220,6 +359,13 @@ const contextChapterIndex = computed(() => {
   const id = contextMenu.value.chapterId;
   if (id === null) return -1;
   return items.value.findIndex((c) => c.id === id);
+});
+
+/** Volume of the chapter the menu is open for (marks the current volume). */
+const chapterVolumeId = computed(() => {
+  const id = contextMenu.value.chapterId;
+  if (id === null) return null;
+  return items.value.find((c) => c.id === id)?.volumeId ?? null;
 });
 
 /**
@@ -291,8 +437,48 @@ function finishDrag() {
 
   <aside class="sidebar" :class="{ collapsed: isCollapsed }">
     <div class="head">
-      <span v-if="!isCollapsed" class="label">章节</span>
+      <div v-if="!isCollapsed" class="head-tabs">
+        <button
+          class="head-tab"
+          :class="{ active: mode === 'chapters' }"
+          @click="emit('set-mode', 'chapters')"
+        >
+          章节
+        </button>
+        <button
+          class="head-tab"
+          :class="{ active: mode === 'entries' }"
+          @click="emit('set-mode', 'entries')"
+        >
+          设定
+        </button>
+      </div>
       <div class="head-actions">
+        <button
+          v-if="!isCollapsed"
+          class="add"
+          title="新建卷"
+          aria-label="新建卷"
+          @click="emit('create-volume')"
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <path
+              d="M4 7V5a1 1 0 0 1 1-1h5l2 2h7a1 1 0 0 1 1 1v2"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+            <path
+              d="M4 7h16a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
         <button
           v-if="!isCollapsed"
           class="add"
@@ -331,66 +517,105 @@ function finishDrag() {
       </div>
     </div>
 
-    <p v-if="!isCollapsed && !loading && items.length === 0" class="empty">
+    <p
+      v-if="!isCollapsed && !loading && items.length === 0 && volumes.length === 0"
+      class="empty"
+    >
       还没有章节，点击右上角 + 新建
     </p>
 
     <nav v-if="!isCollapsed" class="items" role="list">
-      <div
-        v-for="(ch, index) in items"
-        :key="ch.id"
-        class="item"
-        :class="{
-          active: ch.id === currentId,
-          dragging: dragIndex === index,
-          editing: editingId === ch.id,
-        }"
-        role="listitem"
-        tabindex="0"
-        :aria-current="ch.id === currentId ? 'true' : undefined"
-        :aria-label="`章节：${ch.title || '未命名章节'}`"
-        :draggable="editingId !== ch.id"
-        @click="onSelect(ch.id)"
-        @keydown.enter="onSelect(ch.id)"
-        @keydown.space.prevent="onSelect(ch.id)"
-        @contextmenu.prevent="openContextMenu(ch, $event)"
-        @touchstart.passive="onItemTouchStart(ch, $event)"
-        @touchmove.passive="onItemTouchMove($event)"
-        @touchend="onItemTouchEnd"
-        @touchcancel="onItemTouchEnd"
-        @dragstart="onDragStart(index, $event)"
-        @dragover="onDragOver(index, $event)"
-        @drop="onDrop"
-        @dragend="onDragEnd"
-      >
-        <span class="grip" title="拖动排序" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="14" height="14">
-            <circle cx="9" cy="6" r="1.4" fill="currentColor" />
-            <circle cx="15" cy="6" r="1.4" fill="currentColor" />
-            <circle cx="9" cy="12" r="1.4" fill="currentColor" />
-            <circle cx="15" cy="12" r="1.4" fill="currentColor" />
-            <circle cx="9" cy="18" r="1.4" fill="currentColor" />
-            <circle cx="15" cy="18" r="1.4" fill="currentColor" />
-          </svg>
-        </span>
-        <div class="item-copy" @dblclick.stop="startRename(ch)">
+      <template v-for="(group, groupIndex) in groupedItems" :key="group.key">
+        <!-- 卷头（含未分卷组标签） -->
+        <div
+          v-if="group.volume || group.label"
+          class="volume-head"
+          :class="{
+            'editing-volume': group.volume && editingVolumeId === group.volume.id,
+            ungrouped: !group.volume,
+          }"
+          @contextmenu.prevent="group.volume && openVolumeMenu(group.volume, $event)"
+        >
+          <span class="volume-icon" aria-hidden="true">▤</span>
           <input
-            v-if="editingId === ch.id"
-            ref="titleInput"
+            v-if="group.volume && editingVolumeId === group.volume.id"
+            ref="volumeTitleInput"
             v-model="titleDraft"
             class="name-input"
-            aria-label="章节名称"
+            aria-label="卷名"
             @click.stop
-            @keydown.enter.prevent="commitRename"
-            @keydown.esc.prevent="cancelRename"
-            @blur="commitRename"
+            @keydown.enter.prevent="commitVolumeRename"
+            @keydown.esc.prevent="editingVolumeId = null"
+            @blur="commitVolumeRename"
           />
           <template v-else>
-            <span class="name">{{ ch.title || "未命名章节" }}</span>
-            <span class="word-count">{{ formatCount(getWordCount(ch)) }} 字</span>
+            <span
+              v-if="group.volume"
+              class="volume-title"
+              @dblclick.stop="startRenameVolume(group.volume)"
+              >{{ group.volume.title }}</span
+            >
+            <span v-else class="volume-title">{{ group.label }}</span>
+            <span class="volume-count">{{ group.items.length }}</span>
           </template>
         </div>
-      </div>
+
+        <div
+          v-for="(ch, index) in group.items"
+          :key="ch.id"
+          class="item"
+          :class="{
+            active: ch.id === currentId,
+            dragging: dragIndex === flatIndex(groupIndex, index),
+            editing: editingId === ch.id,
+          }"
+          role="listitem"
+          tabindex="0"
+          :aria-current="ch.id === currentId ? 'true' : undefined"
+          :aria-label="`章节：${ch.title || '未命名章节'}`"
+          :draggable="editingId !== ch.id"
+          @click="onSelect(ch.id)"
+          @keydown.enter="onSelect(ch.id)"
+          @keydown.space.prevent="onSelect(ch.id)"
+          @contextmenu.prevent="openContextMenu(ch, $event)"
+          @touchstart.passive="onItemTouchStart(ch, $event)"
+          @touchmove.passive="onItemTouchMove($event)"
+          @touchend="onItemTouchEnd"
+          @touchcancel="onItemTouchEnd"
+          @dragstart="onDragStart(flatIndex(groupIndex, index), $event)"
+          @dragover="onDragOver(flatIndex(groupIndex, index), $event)"
+          @drop="onDrop"
+          @dragend="onDragEnd"
+        >
+          <span class="grip" title="拖动排序" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="14" height="14">
+              <circle cx="9" cy="6" r="1.4" fill="currentColor" />
+              <circle cx="15" cy="6" r="1.4" fill="currentColor" />
+              <circle cx="9" cy="12" r="1.4" fill="currentColor" />
+              <circle cx="15" cy="12" r="1.4" fill="currentColor" />
+              <circle cx="9" cy="18" r="1.4" fill="currentColor" />
+              <circle cx="15" cy="18" r="1.4" fill="currentColor" />
+            </svg>
+          </span>
+          <div class="item-copy" @dblclick.stop="startRename(ch)">
+            <input
+              v-if="editingId === ch.id"
+              ref="titleInput"
+              v-model="titleDraft"
+              class="name-input"
+              aria-label="章节名称"
+              @click.stop
+              @keydown.enter.prevent="commitRename"
+              @keydown.esc.prevent="cancelRename"
+              @blur="commitRename"
+            />
+            <template v-else>
+              <span class="name">{{ ch.title || "未命名章节" }}</span>
+              <span class="word-count">{{ formatCount(getWordCount(ch)) }} 字</span>
+            </template>
+          </div>
+        </div>
+      </template>
     </nav>
 
     <div v-if="!isCollapsed && loading" class="loading">
@@ -413,39 +638,88 @@ function finishDrag() {
         :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
         role="menu"
       >
-        <button class="context-item" role="menuitem" @click="renameFromMenu">
-          重命名
-        </button>
-        <button class="context-item" role="menuitem" @click="duplicateFromMenu">
-          复制章节
-        </button>
-        <button
-          class="context-item"
-          role="menuitem"
-          :disabled="contextChapterIndex <= 0"
-          @click="moveChapter(-1)"
-        >
-          上移
-        </button>
-        <button
-          class="context-item"
-          role="menuitem"
-          :disabled="
-            contextChapterIndex === -1 ||
-            contextChapterIndex >= items.length - 1
-          "
-          @click="moveChapter(1)"
-        >
-          下移
-        </button>
-        <div class="context-separator"></div>
-        <button
-          class="context-item danger"
-          role="menuitem"
-          @click="removeFromMenu"
-        >
-          删除章节
-        </button>
+        <!-- 卷菜单 -->
+        <template v-if="contextMenu.volumeId !== null">
+          <button class="context-item" role="menuitem" @click="renameVolumeFromMenu">
+            重命名卷
+          </button>
+          <div class="context-separator"></div>
+          <button
+            class="context-item danger"
+            role="menuitem"
+            @click="deleteVolumeFromMenu"
+          >
+            删除卷
+          </button>
+        </template>
+
+        <!-- 章节菜单：移动到卷子菜单 -->
+        <template v-else-if="contextMenu.mode === 'move-volume'">
+          <button
+            class="context-item context-back"
+            role="menuitem"
+            @click="contextMenu.mode = 'main'"
+          >
+            ← 返回
+          </button>
+          <button class="context-item" role="menuitem" @click="moveChapterToVolume(null)">
+            未分卷
+          </button>
+          <button
+            v-for="volume in volumes"
+            :key="volume.id"
+            class="context-item"
+            role="menuitem"
+            :class="{ checked: chapterVolumeId === volume.id }"
+            @click="moveChapterToVolume(volume.id)"
+          >
+            {{ volume.title }}
+          </button>
+        </template>
+
+        <!-- 章节主菜单 -->
+        <template v-else>
+          <button class="context-item" role="menuitem" @click="renameFromMenu">
+            重命名
+          </button>
+          <button class="context-item" role="menuitem" @click="duplicateFromMenu">
+            复制章节
+          </button>
+          <button
+            class="context-item"
+            role="menuitem"
+            :disabled="contextChapterIndex <= 0"
+            @click="moveChapter(-1)"
+          >
+            上移
+          </button>
+          <button
+            class="context-item"
+            role="menuitem"
+            :disabled="
+              contextChapterIndex === -1 ||
+              contextChapterIndex >= items.length - 1
+            "
+            @click="moveChapter(1)"
+          >
+            下移
+          </button>
+          <div class="context-separator"></div>
+          <button class="context-item" role="menuitem" @click="historyFromMenu">
+            版本历史
+          </button>
+          <button class="context-item" role="menuitem" @click="openMoveVolumeMenu">
+            移动到卷 ▸
+          </button>
+          <div class="context-separator"></div>
+          <button
+            class="context-item danger"
+            role="menuitem"
+            @click="removeFromMenu"
+          >
+            删除章节
+          </button>
+        </template>
       </div>
     </Transition>
   </Teleport>
@@ -491,11 +765,30 @@ function finishDrag() {
   gap: 2px;
 }
 
-.label {
-  font-size: 14px;
+.head-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: #f0eee7;
+  border-radius: 8px;
+}
+
+.head-tab {
+  padding: 4px 10px;
+  font-size: 12px;
+  color: #8a8577;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.head-tab.active {
+  background: #fff;
+  color: #444;
   font-weight: 600;
-  letter-spacing: 0.02em;
-  color: #666;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 .add {
@@ -549,6 +842,72 @@ function finishDrag() {
   font-size: 0.82rem;
   line-height: 1.6;
   color: #b6b0a1;
+}
+
+/* ---- volume groups ---- */
+.volume-head {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 10px;
+  padding: 5px 10px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #8a8577;
+  letter-spacing: 0.03em;
+  user-select: none;
+  cursor: context-menu;
+  border-radius: 8px;
+  transition: background 0.15s ease;
+}
+
+.volume-head:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.volume-head.ungrouped {
+  color: #b0aa9b;
+  font-weight: 500;
+}
+
+.volume-icon {
+  font-size: 11px;
+  color: #c0baab;
+}
+
+.volume-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: context-menu;
+}
+
+.volume-count {
+  font-size: 11px;
+  font-weight: 500;
+  color: #b6b0a1;
+  font-variant-numeric: tabular-nums;
+}
+
+.volume-head .name-input {
+  font-size: 12px;
+  font-weight: 600;
+  color: #8a8577;
+}
+
+.context-item.context-back {
+  color: #8a8577;
+}
+
+.context-item.checked::after {
+  content: "✓";
+  margin-left: auto;
+  color: #4f6ef7;
+  font-size: 12px;
 }
 
 .items {

@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted, ref, computed } from "vue";
 import type { useBooks } from "../composables/useBooks";
 import BookCard from "../components/BookCard.vue";
+import WritingCalendar from "../components/WritingCalendar.vue";
 import { useConfirm } from "../composables/useConfirm";
 import { showToast } from "../composables/useToast";
 
@@ -141,6 +142,8 @@ function onEsc(e: KeyboardEvent) {
           </div>
         </Transition>
       </div>
+
+      <WritingCalendar />
     </main>
   </div>
 </template>

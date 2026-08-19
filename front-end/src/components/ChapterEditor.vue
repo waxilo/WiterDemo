@@ -55,6 +55,7 @@ watch(
     if (editorRef.value.innerText !== next) {
       editorRef.value.innerText = next;
     }
+    syncHeadings();
   },
   { immediate: true }
 );
@@ -98,9 +99,88 @@ function readEditorText(el: HTMLElement): string {
 
 // --- methods exposed to the parent (find/replace panel) ----------------------
 
+// --- headings (outline support) ---------------------------------------------
+//
+// A heading is a line starting with `#` to `######` followed by a space
+// (Markdown style). We mark heading lines with classes on their <div> so the
+// outline panel can jump to them and the editor can render them bigger.
+// Marking only adds/removes classes — the DOM structure never changes, so the
+// caret stays exactly where it is while typing.
+
+const HEADING_PATTERN = /^(#{1,6})\s+(.+)$/;
+
+/** Re-tag every line's <div> as heading/normal (called on input & reload). */
+function syncHeadings(): void {
+  const el = editorRef.value;
+  if (!el) return;
+  for (const child of el.children) {
+    const div = child as HTMLElement;
+    // Fast path: lines that do not start with '#' are never headings.
+    const text = div.textContent ?? "";
+    if (text.charCodeAt(0) !== 35 /* # */) {
+      if (div.classList.contains("heading")) {
+        div.classList.remove("heading");
+        delete div.dataset.heading;
+      }
+      continue;
+    }
+    const match = text.match(HEADING_PATTERN);
+    if (match) {
+      div.classList.add("heading");
+      div.dataset.heading = String(match[1].length);
+    } else {
+      div.classList.remove("heading");
+      delete div.dataset.heading;
+    }
+  }
+}
+
+/**
+ * Scroll the editor to the n-th heading (outline panel jump). Returns false
+ * when the index is out of range. The caret is not moved.
+ */
+function locateHeading(index: number): boolean {
+  const el = editorRef.value;
+  if (!el) return false;
+  const targets = el.querySelectorAll<HTMLElement>("[data-heading]");
+  const target = targets[index];
+  if (!target) return false;
+  target.scrollIntoView({ block: "center" });
+  // Brief highlight so the jump is visible.
+  target.classList.add("heading-flash");
+  setTimeout(() => target.classList.remove("heading-flash"), 1200);
+  return true;
+}
+
+/** The scrolling container of the paper (for outline scroll-tracking). */
+function getScrollContainer(): HTMLElement | null {
+  return editorRef.value?.closest(".paper-scroll") ?? null;
+}
+
+/**
+ * Index of the heading currently near the top of the scrollport (-1 when
+ * none). Used by the outline panel to highlight the active section.
+ */
+function getActiveHeadingIndex(): number {
+  const el = editorRef.value;
+  const scroll = getScrollContainer();
+  if (!el || !scroll) return -1;
+  const targets = el.querySelectorAll<HTMLElement>("[data-heading]");
+  const scrollRect = scroll.getBoundingClientRect();
+  const threshold = scrollRect.top + 64;
+  let active = -1;
+  targets.forEach((target, index) => {
+    if (target.getBoundingClientRect().top <= threshold) active = index;
+  });
+  return active;
+}
+
 /** Re-populate the editor from the model (after an in-place content rewrite). */
 function reloadFromModel(): void {
-  if (editorRef.value) editorRef.value.innerText = current.value?.content ?? "";
+  if (editorRef.value) {
+    editorRef.value.innerText = current.value?.content ?? "";
+    syncHeadings();
+  }
 }
 
 /**
@@ -130,11 +210,12 @@ function locate(keyword: string): boolean {
   return false;
 }
 
-defineExpose({ reloadFromModel, locate });
+defineExpose({ reloadFromModel, locate, locateHeading, getScrollContainer, getActiveHeadingIndex });
 
 function onInput(e: Event) {
   if (!current.value) return;
   current.value.content = readEditorText(e.target as HTMLElement);
+  syncHeadings();
   scheduleAutoSave();
 }
 
@@ -370,6 +451,45 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
   content: attr(data-placeholder);
   color: #bbb;
   pointer-events: none;
+}
+
+/* Heading lines (outline): `# 标题` … `###### 标题` */
+.paper .heading {
+  font-weight: 700;
+  color: #2a2a2a;
+}
+
+/* Hide the leading '#' visually (it stays in the text model, so the
+   outline/heading semantics and serialization are unaffected). */
+.paper .heading::first-letter {
+  visibility: hidden;
+}
+
+.paper .heading[data-heading="1"] {
+  font-size: 1.5em;
+  margin-top: 0.6em;
+}
+
+.paper .heading[data-heading="2"] {
+  font-size: 1.25em;
+  margin-top: 0.45em;
+}
+
+.paper .heading[data-heading="3"] {
+  font-size: 1.1em;
+  margin-top: 0.3em;
+}
+
+.paper .heading[data-heading="4"],
+.paper .heading[data-heading="5"],
+.paper .heading[data-heading="6"] {
+  font-size: 1em;
+}
+
+.paper .heading-flash {
+  background: rgba(79, 110, 247, 0.12);
+  border-radius: 4px;
+  transition: background 0.3s ease;
 }
 
 .paper ::selection {

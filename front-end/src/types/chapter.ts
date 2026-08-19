@@ -11,6 +11,8 @@ export interface ChapterSummary {
   charCount?: number;
   /** Optimistic-lock counter (used by the multi-device sync poller). */
   version?: number;
+  /** Volume grouping (optional: older API responses may omit it). */
+  volumeId?: number | null;
 }
 
 /** Chapter detail (with content). */
@@ -39,6 +41,24 @@ export interface SearchResult {
 export interface ReplaceResult {
   totalReplaced: number;
   chapters: { id: number; title: string; replaced: number }[];
+}
+
+/** One heading line extracted from a chapter. */
+export interface OutlineHeading {
+  level: number;
+  text: string;
+}
+
+/** One chapter's heading hierarchy (book-wide outline). */
+export interface BookOutlineChapter {
+  id: number;
+  title: string;
+  headings: OutlineHeading[];
+}
+
+/** Book-wide outline response. */
+export interface BookOutline {
+  chapters: BookOutlineChapter[];
 }
 
 /**

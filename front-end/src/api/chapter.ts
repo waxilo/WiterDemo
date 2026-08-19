@@ -5,6 +5,7 @@ import type {
   SaveChapterPayload,
   SearchResult,
   ReplaceResult,
+  BookOutline,
 } from "../types/chapter";
 
 /** List chapters of a book (no content). */
@@ -72,4 +73,9 @@ export function replaceAllChapters(
     method: "POST",
     body: { from, to },
   });
+}
+
+/** Book-wide outline: heading hierarchy of every chapter (no content). */
+export function getBookOutline(bookId: number): Promise<BookOutline> {
+  return request<BookOutline>(`/books/${bookId}/outline`, { method: "GET" });
 }
