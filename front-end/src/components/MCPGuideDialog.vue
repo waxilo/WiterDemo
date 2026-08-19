@@ -1,11 +1,25 @@
 <script setup lang="ts">
 import BaseDialog from "./dialog/BaseDialog.vue";
+import CodeBlock from "./CodeBlock.vue";
 
 /**
  * MCP 接入教程弹层：教用户把写作助手接入外部 AI（Claude Desktop / Cursor）。
- * 内容静态，从书架页"AI 接入"入口打开。
+ * 内容静态，从顶部栏"AI 接入"入口打开。
  */
 const emit = defineEmits<{ (e: "close"): void }>();
+
+const INSTALL_CODE = "npm install -g writer-demo-mcp";
+const LOGIN_CODE = "writer-demo-mcp login";
+const CLAUDE_CONFIG = `{
+  "mcpServers": {
+    "writer-demo": {
+      "command": "writer-demo-mcp",
+      "args": []
+    }
+  }
+}`;
+const CURSOR_CONFIG = `command: writer-demo-mcp
+args: （留空）`;
 </script>
 
 <template>
@@ -23,12 +37,12 @@ const emit = defineEmits<{ (e: "close"): void }>();
       </p>
 
       <h4 class="guide-step">① 安装（在电脑终端执行）</h4>
-      <pre class="guide-code">npm install -g writer-demo-mcp</pre>
+      <CodeBlock :code="INSTALL_CODE" single />
       <p class="guide-note">不想全局安装也可以，后面的配置命令改为
         <code>npx -y writer-demo-mcp</code> 即可。</p>
 
       <h4 class="guide-step">② 登录账号</h4>
-      <pre class="guide-code">writer-demo-mcp login</pre>
+      <CodeBlock :code="LOGIN_CODE" single />
       <p class="guide-note">输入写作助手的账号密码，凭证保存在
         <code>~/.writer-mcp.json</code>（仅本人可读）。</p>
 
@@ -39,17 +53,11 @@ const emit = defineEmits<{ (e: "close"): void }>();
         菜单 → Settings → Developer → Edit Config，在
         <code>claude_desktop_config.json</code> 中加入：
       </p>
-      <pre class="guide-code">{ "mcpServers": {
-    "writer-demo": {
-      "command": "writer-demo-mcp",
-      "args": []
-    }
-} }</pre>
+      <CodeBlock :code="CLAUDE_CONFIG" />
 
       <p class="guide-client">Cursor</p>
       <p class="guide-note">Settings → MCP → Add new MCP server → command 类型：</p>
-      <pre class="guide-code">command: writer-demo-mcp
-args: （留空）</pre>
+      <CodeBlock :code="CURSOR_CONFIG" />
 
       <h4 class="guide-step">④ 开始使用</h4>
       <p class="guide-note">
@@ -78,7 +86,7 @@ args: （留空）</pre>
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-height: 70vh;
+  max-height: 72vh;
   overflow-y: auto;
 }
 
@@ -97,31 +105,17 @@ args: （留空）</pre>
 }
 
 .guide-step {
-  margin: 10px 0 4px;
+  margin: 12px 0 4px;
   font-size: 13.5px;
   font-weight: 600;
   color: #3a3a3a;
 }
 
 .guide-client {
-  margin: 8px 0 2px;
+  margin: 10px 0 2px;
   font-size: 12.5px;
   font-weight: 600;
   color: #6b7a9c;
-}
-
-.guide-code {
-  box-sizing: border-box;
-  margin: 4px 0;
-  padding: 10px 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.6;
-  color: #e8eaf0;
-  background: #2b2f38;
-  border-radius: 8px;
-  overflow-x: auto;
-  white-space: pre;
 }
 
 .guide-note {
