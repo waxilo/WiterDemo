@@ -88,33 +88,40 @@ function onEsc(e: KeyboardEvent) {
         <span class="brand-name">写作助手</span>
       </div>
 
-      <div class="user">
-        <button
-          class="user-trigger"
-          :class="{ open: menuOpen }"
-          @click.stop="toggleMenu"
-        >
-          <span class="avatar">{{ avatarText }}</span>
-          <span class="uname">{{ username || "用户" }}</span>
-          <svg class="chevron" viewBox="0 0 24 24" width="14" height="14">
-            <path
-              d="M6 9l6 6 6-6"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-          </svg>
+      <div class="bar-actions">
+        <button class="mcp-entry" title="AI 接入教程" @click="guideOpen = true">
+          <span class="mcp-icon">🤖</span>
+          <span class="mcp-label">AI 接入</span>
         </button>
 
-        <Transition name="menu">
-          <div v-if="menuOpen" class="menu" @click.stop>
-            <button class="menu-item" @click="onChangePassword">修改密码</button>
-            <div class="menu-sep"></div>
-            <button class="menu-item danger" @click="onLogout">退出登录</button>
-          </div>
-        </Transition>
+        <div class="user">
+          <button
+            class="user-trigger"
+            :class="{ open: menuOpen }"
+            @click.stop="toggleMenu"
+          >
+            <span class="avatar">{{ avatarText }}</span>
+            <span class="uname">{{ username || "用户" }}</span>
+            <svg class="chevron" viewBox="0 0 24 24" width="14" height="14">
+              <path
+                d="M6 9l6 6 6-6"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+
+          <Transition name="menu">
+            <div v-if="menuOpen" class="menu" @click.stop>
+              <button class="menu-item" @click="onChangePassword">修改密码</button>
+              <div class="menu-sep"></div>
+              <button class="menu-item danger" @click="onLogout">退出登录</button>
+            </div>
+          </Transition>
+        </div>
       </div>
     </header>
 
@@ -124,10 +131,6 @@ function onEsc(e: KeyboardEvent) {
       <div class="page-head">
         <h1>我的书架</h1>
         <p class="subtitle">记录你的每一个故事</p>
-        <button class="mcp-entry" title="AI 接入教程" @click="guideOpen = true">
-          <span class="mcp-icon">🤖</span>
-          <span>AI 接入</span>
-        </button>
       </div>
 
       <MCPGuideDialog v-if="guideOpen" @close="guideOpen = false" />
@@ -317,18 +320,20 @@ function onEsc(e: KeyboardEvent) {
 }
 
 .page-head {
-  position: relative;
   margin-bottom: 2rem;
 }
 
+.bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .mcp-entry {
-  position: absolute;
-  right: 0;
-  bottom: 0;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 7px 14px;
+  gap: 5px;
+  padding: 7px 13px;
   font-size: 12.5px;
   font-weight: 500;
   color: #5b6a8c;
@@ -465,5 +470,19 @@ h1 {
 .menu-leave-to {
   opacity: 0;
   transform: translateY(-6px);
+}
+
+@media (max-width: 760px) {
+  .mcp-label {
+    display: none;
+  }
+
+  .mcp-entry {
+    padding: 6px 9px;
+  }
+
+  .bar-actions {
+    gap: 6px;
+  }
 }
 </style>

@@ -13,6 +13,8 @@ const props = withDefaults(
     closeOnMask?: boolean;
     /** 按 ESC 是否关闭，默认 true */
     closeOnEsc?: boolean;
+    /** 面板宽度（px），默认 420；小屏自动收缩。 */
+    panelWidth?: number;
   }>(),
   {
     closeOnMask: true,
@@ -93,6 +95,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown, true));
         <div
           ref="panelRef"
           class="dialog-panel"
+          :style="panelWidth ? { '--panel-width': `${panelWidth}px` } : undefined"
           role="dialog"
           aria-modal="true"
           tabindex="-1"
@@ -119,8 +122,8 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown, true));
 }
 
 .dialog-panel {
-  width: 420px;
-  max-width: min(480px, calc(100vw - 40px));
+  width: var(--panel-width, 420px);
+  max-width: min(var(--panel-width, 480px), calc(100vw - 40px));
   padding: 28px;
   background: #fffdf8;
   border-radius: 16px;

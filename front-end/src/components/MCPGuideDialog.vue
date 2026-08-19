@@ -9,7 +9,12 @@ const emit = defineEmits<{ (e: "close"): void }>();
 </script>
 
 <template>
-  <BaseDialog :visible="true" :close-on-mask="false" @close="emit('close')">
+  <BaseDialog
+    :visible="true"
+    :close-on-mask="false"
+    :panel-width="680"
+    @close="emit('close')"
+  >
     <div class="guide">
       <h3 class="guide-title">🤖 AI 接入（MCP）</h3>
       <p class="guide-intro">
