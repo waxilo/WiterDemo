@@ -158,6 +158,7 @@ export async function router(ctx: Ctx): Promise<Response> {
    *    session of the account is revoked.
    */
   const isWrite = method === "POST" || method === "PUT" || method === "DELETE";
+  let isMcpSession = false;
   if (isWrite && ctx.userSid !== undefined) {
     const mine = await sessionService.findSession(
       ctx.env,
@@ -167,15 +168,18 @@ export async function router(ctx: Ctx): Promise<Response> {
     if (!mine || mine.revoked === 1) {
       return jsonResponse(null, 401, "账号已在其他设备使用，请重新登录");
     }
+    // AI 工具会话：写操作不触发抢占（MCP 与网页端隔离，乐观锁兜底并发）。
+    isMcpSession = mine.is_mcp === 1;
   }
 
-  /** Kick all other sessions after a successful write; never fails the request. */
+  /** Kick all other NON-MCP sessions after a successful write; never fails the request. */
   const afterWrite = async (res: Promise<Response> | Response): Promise<Response> => {
     const response = await res;
     if (
       response.status < 400 &&
       response.status !== 204 &&
-      ctx.userSid !== undefined
+      ctx.userSid !== undefined &&
+      !isMcpSession
     ) {
       // Best effort: a failed kick must not turn a successful write into 500.
       await sessionService

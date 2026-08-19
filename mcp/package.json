@@ -1,6 +1,6 @@
 {
   "name": "writer-demo-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "WriterDemo 写作助手 MCP server：让 Claude Desktop / Cursor 等 AI 客户端读写章节正文与设定资料库（人物/地点/设定）",
   "engines": {
@@ -11,7 +11,8 @@
     "start": "node server.mjs"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.0"
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^4.0.0"
   },
   "license": "MIT",
   "keywords": [

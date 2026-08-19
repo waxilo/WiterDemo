@@ -5,22 +5,20 @@ WriterDemo 写作助手 MCP server：让外部 AI（Claude Desktop、Cursor、Cl
 创建人物/地点/设定条目、修改章节内容、全书搜索等。数据与网页端完全一致
 （同一套 Cloudflare API）。
 
-## 安装
+## 使用（免安装，自动更新）
+
+**安装和更新是同一个命令**——`npx` 每次运行自动检查并拉取 npm 最新版：
 
 ```bash
-# 全局安装（之后任何 MCP 客户端都能用）
-npm install -g writer-demo-mcp
-
-# 或临时运行（npx 自动下载）
-npx -y writer-demo-mcp
+npx -y writer-demo-mcp          # 首次拉取最新版并启动
+npx -y writer-demo-mcp login    # 登录（凭证存 ~/.writer-mcp.json，600 权限）
 ```
 
-首次使用先登录（凭证存 `~/.writer-mcp.json`，600 权限）：
+以后发布新版本无需任何升级操作，下次运行自动使用最新版。
 
-```bash
-writer-demo-mcp login
-# 或：npx -y writer-demo-mcp login
-```
+> **全局安装方式**（可选）：`npm install -g writer-demo-mcp`
+> 更新全局包用同一个命令：`npm install -g writer-demo-mcp@latest`
+> server 启动时会自动检查 npm 最新版，落后时在终端提示更新命令。
 
 > 环境变量可覆盖：`WRITER_MCP_CONFIG`（凭证路径）、`WRITER_API_BASE`（API 地址）。
 
@@ -61,6 +59,8 @@ npm run login        # 输入账号密码，凭证存到 ~/.writer-mcp.json（60
 ```
 
 重启 Claude Desktop 后即可让 AI"查看我的书、新建一个人物设定、把第 3 章某个名字全局替换"等。
+
+> **提示**：若 Claude Desktop 报"找不到 npx"，是因为 GUI 应用的环境 PATH 不含 npx 所在目录——终端执行 `which npx` 拿到绝对路径，把配置改为 `"command": "/绝对路径/npx"`（如 `/usr/local/bin/npx`）。
 
 ## 接入 Cursor
 

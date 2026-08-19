@@ -13,6 +13,8 @@ interface SessionRow {
   token_expire_ms: number;
   /** Derived in SQL: `login_time + token_expire_ms`, as ms since epoch. */
   expire_at_ms: number;
+  /** 1 for AI-tool (MCP) sessions, exempt from the single-session kick. */
+  is_mcp?: number;
 }
 
 /** Register a new refresh-token session (stores only the token hash). */
@@ -21,14 +23,15 @@ export async function createSession(
   userId: number,
   jti: string,
   token: string,
-  ttlMs: number
+  ttlMs: number,
+  isMcp = false
 ): Promise<void> {
   const hash = await sha256Hex(token);
   await env.DB.prepare(
-    `insert into t_login_log (user_id, token, token_expire_ms, jti, revoked, last_used)
-     values (?, ?, ?, ?, 0, CURRENT_TIMESTAMP)`
+    `insert into t_login_log (user_id, token, token_expire_ms, jti, revoked, last_used, is_mcp)
+     values (?, ?, ?, ?, 0, CURRENT_TIMESTAMP, ?)`
   )
-    .bind(userId, hash, ttlMs, jti)
+    .bind(userId, hash, ttlMs, jti, isMcp ? 1 : 0)
     .run();
 }
 
@@ -91,7 +94,8 @@ export async function rotateSession(
   oldJti: string,
   newJti: string,
   newToken: string,
-  newTtlMs: number
+  newTtlMs: number,
+  isMcp = false
 ): Promise<boolean> {
   const hash = await sha256Hex(newToken);
 
@@ -112,10 +116,10 @@ export async function rotateSession(
   }
 
   await env.DB.prepare(
-    `insert into t_login_log (user_id, token, token_expire_ms, jti, revoked, last_used)
-     values (?, ?, ?, ?, 0, CURRENT_TIMESTAMP)`
+    `insert into t_login_log (user_id, token, token_expire_ms, jti, revoked, last_used, is_mcp)
+     values (?, ?, ?, ?, 0, CURRENT_TIMESTAMP, ?)`
   )
-    .bind(userId, hash, newTtlMs, newJti)
+    .bind(userId, hash, newTtlMs, newJti, isMcp ? 1 : 0)
     .run();
 
   // Opportunistic cleanup of expired/revoked rows (keeps the table bounded).
@@ -150,10 +154,11 @@ export async function revokeAllForUser(
 }
 
 /**
- * Revoke every session of a user EXCEPT the given one. This is the
+ * Revoke every NON-MCP session of a user EXCEPT the given one. This is the
  * single-active-session kick: after a successful write, every other device of
  * the same account is signed out (their next request gets a 401 and the
- * client force-logs out).
+ * client force-logs out). MCP/AI-tool sessions (is_mcp=1) are exempt so a
+ * long-running AI integration is not kicked by normal web writing.
  */
 export async function revokeAllExcept(
   env: Env,
@@ -162,7 +167,7 @@ export async function revokeAllExcept(
 ): Promise<void> {
   await env.DB.prepare(
     `update t_login_log set revoked = 1
-     where user_id = ? and jti != ? and revoked = 0`
+     where user_id = ? and jti != ? and revoked = 0 and is_mcp = 0`
   )
     .bind(userId, exceptJti)
     .run();

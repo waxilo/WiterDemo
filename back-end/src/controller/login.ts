@@ -21,11 +21,14 @@ interface RefreshBody {
 export async function login(ctx: Ctx): Promise<Response> {
   const body = await ctx.json<LoginBody>();
   const ip = ctx.request.headers.get("CF-Connecting-IP") ?? "";
+  // AI 工具（MCP）登录时带 X-Client: mcp 标记会话，豁免单会话抢占。
+  const client = ctx.request.headers.get("X-Client") ?? undefined;
   const tokens = await authService.login(
     body.username,
     body.password,
     ctx.env,
-    ip
+    ip,
+    client
   );
   return jsonResponse(tokens);
 }
@@ -93,7 +96,8 @@ export async function refresh(ctx: Ctx): Promise<Response> {
     check.jti,
     newJti,
     newRefresh,
-    ttlMs
+    ttlMs,
+    session.is_mcp === 1
   );
   if (!rotated) {
     // A concurrent refresh rotated this session first (edge of the race);

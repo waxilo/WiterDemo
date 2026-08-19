@@ -16,6 +16,8 @@ import { join, dirname } from "node:path";
 const CONFIG_PATH =
   process.env.WRITER_MCP_CONFIG || join(homedir(), ".writer-mcp.json");
 const DEFAULT_API_BASE = "https://api.sloan.dpdns.org";
+/** 发布到 npm 的当前版本（发布时同步更新）。 */
+const VERSION = "0.1.1";
 
 // --- `login` subcommand -------------------------------------------------------
 
@@ -44,7 +46,10 @@ async function runLogin() {
   const apiBase = process.env.WRITER_API_BASE || DEFAULT_API_BASE;
   const res = await fetch(`${apiBase}/login`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "X-Client": "mcp", // 标记 AI 工具会话，豁免单会话抢占
+    },
     body: JSON.stringify({ username, password }),
   });
   const json = await res.json().catch(() => null);
@@ -69,6 +74,31 @@ if (process.argv[2] === "login") {
   await runLogin();
 }
 
+/**
+ * 启动时检查 npm 最新版本，落后时在 stderr 提示更新命令。
+ * （MCP 协议走 stdout，stderr 不会被解析，安全。）
+ */
+async function checkForUpdate() {
+  try {
+    const res = await fetch("https://registry.npmjs.org/writer-demo-mcp/latest", {
+      signal: AbortSignal.timeout(5000),
+    });
+    const json = await res.json();
+    if (json.version && json.version !== VERSION) {
+      console.error(
+        `[writer-demo-mcp] 发现新版本 v${json.version}（当前 v${VERSION}）。` +
+          `更新：npm install -g writer-demo-mcp@latest；或改用 npx -y writer-demo-mcp 自动获取最新。`
+      );
+    }
+  } catch {
+    // 网络不可用时静默，不影响 MCP 启动。
+  }
+}
+
+if (process.argv[2] !== "login") {
+  void checkForUpdate();
+}
+
 // --- MCP server ---------------------------------------------------------------
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -84,7 +114,7 @@ function loadConfig() {
     config = JSON.parse(readFileSync(CONFIG_PATH, "utf8"));
   } catch {
     throw new Error(
-      `未找到凭证 ${CONFIG_PATH}。请先运行：node mcp/login.mjs（输入账号密码登录）`
+      `未找到凭证 ${CONFIG_PATH}。请先运行：writer-demo-mcp login（输入账号密码登录）`
     );
   }
 }
@@ -99,10 +129,11 @@ async function refreshTokens() {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ refreshToken: config.refreshToken }),
+    signal: AbortSignal.timeout(20_000),
   });
   const json = await res.json().catch(() => null);
   if (!json || json.code !== 200 || !json.data) {
-    throw new Error("登录已过期，请重新运行 node mcp/login.mjs");
+    throw new Error("登录已过期，请重新运行 writer-demo-mcp login");
   }
   config.accessToken = json.data.accessToken;
   config.refreshToken = json.data.refreshToken;
@@ -131,6 +162,7 @@ async function api(path, { method = "GET", body } = {}) {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(20_000),
     });
     return res.json().catch(() => ({
       code: res.status,
@@ -144,7 +176,12 @@ async function api(path, { method = "GET", body } = {}) {
     await refreshTokens();
     json = await request(config.accessToken);
   }
-  if (json.code !== 200) throw new Error(json.message || "请求失败");
+  if (json.code !== 200) {
+    // 携带 code（如 409），供调用方做并发重试等分支处理。
+    throw Object.assign(new Error(json.message || "请求失败"), {
+      code: json.code,
+    });
+  }
   return json.data;
 }
 
@@ -154,19 +191,25 @@ const text = (data) => ({
   content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
 });
 
-/** 章节修改：先取最新版本作为乐观锁基线，避免 409。 */
+/** 章节修改：先取最新版本作为乐观锁基线；并发 409 时自动重试一次。 */
 async function saveChapter(chapterId, patch) {
-  const current = await api(`/chapters/${chapterId}`);
-  const payload = {
-    title: patch.title ?? current.title,
-    content: patch.content ?? current.content,
-    baseVersion: current.version,
-  };
-  const saved = await api(`/chapters/${chapterId}`, {
-    method: "PUT",
-    body: payload,
-  });
-  return saved;
+  for (let attempt = 0; ; attempt++) {
+    const current = await api(`/chapters/${chapterId}`);
+    const payload = {
+      title: patch.title ?? current.title,
+      content: patch.content ?? current.content,
+      baseVersion: current.version,
+    };
+    try {
+      return await api(`/chapters/${chapterId}`, {
+        method: "PUT",
+        body: payload,
+      });
+    } catch (error) {
+      if (attempt === 0 && error?.code === 409) continue; // 重取最新再存
+      throw error;
+    }
+  }
 }
 
 // --- MCP server & tools -------------------------------------------------------

@@ -8,18 +8,19 @@ import CodeBlock from "./CodeBlock.vue";
  */
 const emit = defineEmits<{ (e: "close"): void }>();
 
-const INSTALL_CODE = "npm install -g writer-demo-mcp";
-const LOGIN_CODE = "writer-demo-mcp login";
+// npx 免安装：每次运行自动拉取 npm 最新版，安装与更新同一个命令。
+const INSTALL_CODE = "npx -y writer-demo-mcp";
+const LOGIN_CODE = "npx -y writer-demo-mcp login";
 const CLAUDE_CONFIG = `{
   "mcpServers": {
     "writer-demo": {
-      "command": "writer-demo-mcp",
-      "args": []
+      "command": "npx",
+      "args": ["-y", "writer-demo-mcp"]
     }
   }
 }`;
-const CURSOR_CONFIG = `command: writer-demo-mcp
-args: （留空）`;
+const CURSOR_CONFIG = `command: npx
+args: -y writer-demo-mcp`;
 </script>
 
 <template>
@@ -36,12 +37,14 @@ args: （留空）`;
         客户端直接读写你的书——AI 可以帮你创建设定、润色正文、全书搜索。
       </p>
 
-      <h4 class="guide-step">① 安装（在电脑终端执行）</h4>
+      <h4 class="guide-step">① 无需安装，直接运行（自动拉取最新版）</h4>
       <CodeBlock :code="INSTALL_CODE" single />
-      <p class="guide-note">不想全局安装也可以，后面的配置命令改为
-        <code>npx -y writer-demo-mcp</code> 即可。</p>
+      <p class="guide-note">
+        用 <code>npx</code> 每次运行都会自动检查并拉取 npm 最新版本——<b>安装和更新
+        是同一个命令</b>，以后发布新版本无需手动升级。
+      </p>
 
-      <h4 class="guide-step">② 登录账号</h4>
+      <h4 class="guide-step">② 登录账号（同样用 npx）</h4>
       <CodeBlock :code="LOGIN_CODE" single />
       <p class="guide-note">输入写作助手的账号密码，凭证保存在
         <code>~/.writer-mcp.json</code>（仅本人可读）。</p>

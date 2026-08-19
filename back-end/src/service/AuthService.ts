@@ -3,7 +3,11 @@ import {
   createRefreshToken,
   ACCESS_TTL,
 } from "../utils/token";
-import { createSession, revokeAllExcept } from "./SessionService";
+import {
+  createSession,
+  revokeAllExcept,
+  revokeAllForUser,
+} from "./SessionService";
 import { ApiError } from "../errors";
 import {
   hashPassword,
@@ -110,13 +114,14 @@ const DECOY_HASH =
 /** Issue an access + refresh token pair and register the refresh session. */
 export async function issueTokens(
   userId: number,
-  env: Env
+  env: Env,
+  isMcp = false
 ): Promise<AuthTokens> {
   const { token, jti, ttlMs } = await createRefreshToken(userId, env);
   // The access token is tied to the refresh session so write operations can
   // revoke every OTHER session of this account while keeping this one.
   const accessToken = await createAccessToken(userId, env, jti);
-  await createSession(env, userId, jti, token, ttlMs);
+  await createSession(env, userId, jti, token, ttlMs, isMcp);
   return { accessToken, refreshToken: token, expiresIn: ACCESS_TTL };
 }
 
@@ -131,11 +136,13 @@ interface UserPasswordRow {
  * in place on first successful login (lazy migration). Failed attempts are
  * rate-limited per username+IP.
  */
+/** client = "mcp" 标记 AI 工具会话（豁免单会话抢占）。 */
 export async function login(
   username: string,
   password: string,
   env: Env,
-  ip: string
+  ip: string,
+  client?: string
 ): Promise<AuthTokens> {
   const name = normalizeUsername(username);
   // Lenient at login: only type/upper bound, so legacy accounts with shorter
@@ -180,7 +187,7 @@ export async function login(
   }
 
   await clearFailures(env, name, ip);
-  return issueTokens(user.id, env);
+  return issueTokens(user.id, env, client === "mcp");
 }
 
 /**
@@ -275,8 +282,6 @@ export async function changePassword(
     .bind(hashed, userId)
     .run();
 
-  // Password change is a security event: kick every other session.
-  if (sid !== undefined) {
-    await revokeAllExcept(env, userId, sid);
-  }
+  // Password change is a security event: kick EVERY session (incl. MCP).
+  await revokeAllForUser(env, userId);
 }
