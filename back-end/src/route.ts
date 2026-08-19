@@ -47,6 +47,8 @@ export async function router(ctx: Ctx): Promise<Response> {
   const bookId = seg(1);
   const chapterId = seg(1);
   const isMe = segments.length === 1 && seg(0) === "me";
+  const isMePassword =
+    segments.length === 2 && seg(0) === "me" && seg(1) === "password";
   const isBooks = segments.length === 1 && seg(0) === "books";
   const isBookId =
     segments.length === 2 &&
@@ -128,10 +130,11 @@ export async function router(ctx: Ctx): Promise<Response> {
     ID_SEGMENT.test(chapterId);
 
   if (
-    !isMe && !isBooks && !isBookId && !isBookChapters && !isBookSearch &&
-    !isBookReplace && !isBookOutline && !isBookVolumes && !isBookEntries &&
-    !isVolumeId && !isEntryId && !isChapterId && !isChapterVolume &&
-    !isChapterHistory && !isChapterHistoryItem && !isStatsCalendar
+    !isMe && !isMePassword && !isBooks && !isBookId && !isBookChapters &&
+    !isBookSearch && !isBookReplace && !isBookOutline && !isBookVolumes &&
+    !isBookEntries && !isVolumeId && !isEntryId && !isChapterId &&
+    !isChapterVolume && !isChapterHistory && !isChapterHistoryItem &&
+    !isStatsCalendar
   ) {
     return jsonResponse(null, 404, "Not Found API");
   }
@@ -182,9 +185,12 @@ export async function router(ctx: Ctx): Promise<Response> {
     return response;
   };
 
-  // /me — current user info
-  if (isMe) {
-    if (method === "GET") return userController.me(ctx);
+  // /me — current user info; /me/password — change password
+  if (isMe || isMePassword) {
+    if (isMe && method === "GET") return userController.me(ctx);
+    if (isMePassword && method === "PUT") {
+      return afterWrite(userController.changePassword(ctx));
+    }
     return jsonResponse(null, 404, "Not Found API");
   }
 

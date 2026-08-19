@@ -3,6 +3,8 @@ import { onMounted, onUnmounted, ref, computed } from "vue";
 import type { useBooks } from "../composables/useBooks";
 import BookCard from "../components/BookCard.vue";
 import WritingCalendar from "../components/WritingCalendar.vue";
+import MCPGuideDialog from "../components/MCPGuideDialog.vue";
+import ChangePasswordDialog from "../components/ChangePasswordDialog.vue";
 import { useConfirm } from "../composables/useConfirm";
 import { showToast } from "../composables/useToast";
 
@@ -52,6 +54,13 @@ async function onRemove(id: number) {
 
 // --- user menu ---------------------------------------------------------------
 const menuOpen = ref(false);
+const guideOpen = ref(false);
+const pwdOpen = ref(false);
+
+function onChangePassword() {
+  closeMenu();
+  pwdOpen.value = true;
+}
 
 function toggleMenu() {
   menuOpen.value = !menuOpen.value;
@@ -101,8 +110,7 @@ function onEsc(e: KeyboardEvent) {
 
         <Transition name="menu">
           <div v-if="menuOpen" class="menu" @click.stop>
-            <button class="menu-item" @click="closeMenu">个人中心</button>
-            <button class="menu-item" @click="closeMenu">设置</button>
+            <button class="menu-item" @click="onChangePassword">修改密码</button>
             <div class="menu-sep"></div>
             <button class="menu-item danger" @click="onLogout">退出登录</button>
           </div>
@@ -116,7 +124,14 @@ function onEsc(e: KeyboardEvent) {
       <div class="page-head">
         <h1>我的书架</h1>
         <p class="subtitle">记录你的每一个故事</p>
+        <button class="mcp-entry" title="AI 接入教程" @click="guideOpen = true">
+          <span class="mcp-icon">🤖</span>
+          <span>AI 接入</span>
+        </button>
       </div>
+
+      <MCPGuideDialog v-if="guideOpen" @close="guideOpen = false" />
+      <ChangePasswordDialog v-if="pwdOpen" @close="pwdOpen = false" />
 
       <p v-if="error" class="error">{{ error }}</p>
 
@@ -302,7 +317,39 @@ function onEsc(e: KeyboardEvent) {
 }
 
 .page-head {
+  position: relative;
   margin-bottom: 2rem;
+}
+
+.mcp-entry {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #5b6a8c;
+  background: rgba(79, 110, 247, 0.07);
+  border: 1px solid rgba(79, 110, 247, 0.18);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+
+.mcp-entry:hover {
+  background: rgba(79, 110, 247, 0.13);
+  color: #3f5de0;
+}
+
+.mcp-entry:active {
+  transform: scale(0.97);
+}
+
+.mcp-icon {
+  font-size: 14px;
 }
 
 h1 {

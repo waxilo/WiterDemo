@@ -75,6 +75,10 @@ export function listEntries(
   return request<Entry[]>(`/books/${bookId}/entries${qs}`, { method: "GET" });
 }
 
+export function getEntry(id: number): Promise<Entry> {
+  return request<Entry>(`/entries/${id}`, { method: "GET" });
+}
+
 export function createEntry(
   bookId: number,
   type: EntryType,

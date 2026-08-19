@@ -3,7 +3,7 @@ import {
   createRefreshToken,
   ACCESS_TTL,
 } from "../utils/token";
-import { createSession } from "./SessionService";
+import { createSession, revokeAllExcept } from "./SessionService";
 import { ApiError } from "../errors";
 import {
   hashPassword,
@@ -229,4 +229,54 @@ export async function register(
 
   const userId = Number(result.meta.last_row_id);
   return issueTokens(userId, env);
+}
+
+/**
+ * Change the account password: verify the current one (supports legacy
+ * plaintext rows, upgrading to a hash), store the new hash, and revoke every
+ * OTHER session of the account (the calling session is kept).
+ */
+export async function changePassword(
+  env: Env,
+  userId: number,
+  sid: string | undefined,
+  oldPassword: string,
+  newPassword: string
+): Promise<void> {
+  const next = assertPasswordPolicy(newPassword);
+  if (
+    typeof oldPassword !== "string" ||
+    oldPassword.length === 0 ||
+    oldPassword.length > 128
+  ) {
+    throw new ApiError(400, "当前密码不合法");
+  }
+
+  const user = await env.DB.prepare(
+    `select password from t_user where id = ?`
+  )
+    .bind(userId)
+    .first<{ password: string }>();
+  if (!user) throw new ApiError(404, "用户不存在");
+
+  if (isHashed(user.password)) {
+    if (!(await verifyPassword(oldPassword, user.password))) {
+      throw new ApiError(400, "当前密码错误");
+    }
+  } else {
+    // Legacy plaintext row: compare directly (upgrade happens on save).
+    if (user.password !== oldPassword) {
+      throw new ApiError(400, "当前密码错误");
+    }
+  }
+
+  const hashed = await hashPassword(next);
+  await env.DB.prepare(`update t_user set password = ? where id = ?`)
+    .bind(hashed, userId)
+    .run();
+
+  // Password change is a security event: kick every other session.
+  if (sid !== undefined) {
+    await revokeAllExcept(env, userId, sid);
+  }
 }

@@ -24,3 +24,14 @@ export function logout(refreshToken: string): Promise<{ ok: boolean }> {
 export function getMe(): Promise<UserInfo> {
   return request<UserInfo>("/me", { method: "GET" });
 }
+
+/** Change the account password (other sessions are kicked). */
+export function changePassword(
+  oldPassword: string,
+  newPassword: string
+): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>("/me/password", {
+    method: "PUT",
+    body: { oldPassword, newPassword },
+  });
+}

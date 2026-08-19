@@ -7,7 +7,7 @@ import ChapterEditor from "../components/ChapterEditor.vue";
 import FindReplacePanel from "../components/FindReplacePanel.vue";
 import OutlinePanel from "../components/OutlinePanel.vue";
 import HistoryDialog from "../components/HistoryDialog.vue";
-import SettingsView from "../components/SettingsView.vue";
+
 import { useConfirm } from "../composables/useConfirm";
 import { showToast } from "../composables/useToast";
 import * as writerApi from "../api/writer";
@@ -150,6 +150,7 @@ function cancelEditTitle() {
 
 // --- user menu ---------------------------------------------------------------
 const menuOpen = ref(false);
+const pwdOpen = ref(false);
 
 function toggleMenu() {
   menuOpen.value = !menuOpen.value;
@@ -157,6 +158,11 @@ function toggleMenu() {
 
 function closeMenu() {
   menuOpen.value = false;
+}
+
+function onChangePassword() {
+  closeMenu();
+  pwdOpen.value = true;
 }
 
 function onLogout() {
@@ -198,12 +204,8 @@ async function onOpenAndLocate(chapterId: number, keyword: string) {
   }
 }
 
-// --- left-pane mode: chapters | settings library ----------------------------
-const leftMode = ref<"chapters" | "entries">("chapters");
-
-function onSetMode(mode: "chapters" | "entries") {
-  leftMode.value = mode;
-}
+// --- left pane tabs: chapter list | in-chapter outline ----------------------
+const leftTab = ref<"chapters" | "outline">("chapters");
 
 // --- version history ----------------------------------------------------------
 const historyChapterId = ref<number | null>(null);
@@ -224,16 +226,16 @@ async function onHistoryRestored(): Promise<void> {
   }
 }
 
-// --- outline (right-side chapter navigation) --------------------------------
-const OUTLINE_KEY = "writer_outline_collapsed";
-const outlineCollapsed = ref(localStorage.getItem(OUTLINE_KEY) === "1");
+// --- outline (left tab) + settings (right column) ---------------------------
+const SETTINGS_KEY = "writer_settings_collapsed";
+const settingsCollapsed = ref(localStorage.getItem(SETTINGS_KEY) === "1");
 const outlineActiveIndex = ref(-1);
 let outlineScrollTimer: ReturnType<typeof setTimeout> | null = null;
 let outlineScrollEl: HTMLElement | null = null;
 
-function toggleOutline() {
-  outlineCollapsed.value = !outlineCollapsed.value;
-  localStorage.setItem(OUTLINE_KEY, outlineCollapsed.value ? "1" : "0");
+function toggleSettings() {
+  settingsCollapsed.value = !settingsCollapsed.value;
+  localStorage.setItem(SETTINGS_KEY, settingsCollapsed.value ? "1" : "0");
 }
 
 function onOutlineScroll(): void {
@@ -521,7 +523,7 @@ function onReorder(ids: number[]) {
 
           <Transition name="menu">
             <div v-if="menuOpen" class="menu" @click.stop>
-              <button class="menu-item" @click="closeMenu">个人设置</button>
+              <button class="menu-item" @click="onChangePassword">修改密码</button>
               <div class="menu-sep"></div>
               <button class="menu-item danger" @click="onLogout">
                 退出登录
@@ -536,27 +538,54 @@ function onReorder(ids: number[]) {
     <div v-if="menuOpen" class="menu-backdrop" @click="closeMenu"></div>
 
     <div class="panes">
-      <template v-if="leftMode === 'chapters'">
-      <ChapterList
-        :chapters="list"
-        :volumes="volumes"
-        :current-id="current?.id ?? null"
-        :current-word-count="currentStats.wordCount"
-        :loading="loading"
-        :mode="leftMode"
-        @set-mode="onSetMode"
-        @select="onSelect"
-        @create="onCreate"
-        @create-volume="onCreateVolume"
-        @rename-volume="onRenameVolume"
-        @delete-volume="onDeleteVolume"
-        @move-chapter="onMoveChapter"
-        @remove="onRemove"
-        @rename="onRename"
-        @duplicate="onDuplicate"
-        @history="onChapterHistory"
-        @reorder="onReorder"
-      />
+      <aside class="left-column">
+        <div class="left-tabs">
+          <button
+            class="left-tab"
+            :class="{ active: leftTab === 'chapters' }"
+            @click="leftTab = 'chapters'"
+          >
+            章节
+          </button>
+          <button
+            class="left-tab"
+            :class="{ active: leftTab === 'outline' }"
+            @click="leftTab = 'outline'"
+          >
+            索引
+          </button>
+        </div>
+        <ChapterList
+          v-if="leftTab === 'chapters'"
+          :chapters="list"
+          :volumes="volumes"
+          :current-id="current?.id ?? null"
+          :current-word-count="currentStats.wordCount"
+          :loading="loading"
+          @select="onSelect"
+          @create="onCreate"
+          @create-volume="onCreateVolume"
+          @rename-volume="onRenameVolume"
+          @delete-volume="onDeleteVolume"
+          @move-chapter="onMoveChapter"
+          @remove="onRemove"
+          @rename="onRename"
+          @duplicate="onDuplicate"
+          @history="onChapterHistory"
+          @reorder="onReorder"
+        />
+        <div v-else class="left-outline">
+          <OutlinePanel
+            v-if="current && bookId !== null"
+            :chapters="chapters"
+            :book-id="bookId"
+            :active-index="outlineActiveIndex"
+            @jump="onOutlineJump"
+            @jump-chapter="onOutlineJumpChapter"
+          />
+        </div>
+      </aside>
+
       <div class="editor-column">
         <FindReplacePanel
           v-if="findOpen && bookId !== null"
@@ -592,16 +621,19 @@ function onReorder(ids: number[]) {
         </footer>
       </div>
 
-      <aside class="outline-column" :class="{ collapsed: outlineCollapsed }">
+      <aside
+        class="settings-column"
+        :class="{ collapsed: settingsCollapsed }"
+      >
         <button
-          class="outline-toggle"
-          :title="outlineCollapsed ? '展开章内导航' : '收起章内导航'"
-          :aria-label="outlineCollapsed ? '展开章内导航' : '收起章内导航'"
-          @click="toggleOutline"
+          class="settings-toggle"
+          :title="settingsCollapsed ? '展开设定资料库' : '收起设定资料库'"
+          :aria-label="settingsCollapsed ? '展开设定资料库' : '收起设定资料库'"
+          @click="toggleSettings"
         >
           <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
             <path
-              d="M9 18l6-6-6-6"
+              d="M15 18l-6-6 6-6"
               fill="none"
               stroke="currentColor"
               stroke-width="2"
@@ -610,24 +642,14 @@ function onReorder(ids: number[]) {
             />
           </svg>
         </button>
-        <OutlinePanel
-          v-if="!outlineCollapsed && current && bookId !== null"
-          :chapters="chapters"
+        <SettingsPanel
+          v-if="!settingsCollapsed && bookId !== null"
           :book-id="bookId"
-          :active-index="outlineActiveIndex"
-          @jump="onOutlineJump"
-          @jump-chapter="onOutlineJumpChapter"
         />
       </aside>
-      </template>
-
-      <SettingsView
-        v-else-if="bookId !== null"
-        :book-id="bookId"
-        @set-mode="onSetMode"
-      />
     </div>
 
+    <ChangePasswordDialog v-if="pwdOpen" @close="pwdOpen = false" />
     <HistoryDialog
       v-if="historyChapterId !== null"
       :chapter-id="historyChapterId"
@@ -745,6 +767,291 @@ function onReorder(ids: number[]) {
 }
 
 .numeric,
+.writing-status b {
+  display: inline-block;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.save-meta.saving {
+  color: #78849c;
+}
+
+.save-meta.dirty {
+  color: #a48a56;
+}
+
+.save-meta.error {
+  color: #c45d55;
+  font-weight: 600;
+}
+
+.book-title:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.book-title-input {
+  box-sizing: border-box;
+  width: 100%;
+  font-size: 18px;
+  font-weight: 600;
+  color: #2a2a2a;
+  text-align: center;
+  padding: 0.25em 0.6em;
+  border: 1px solid #dcd7cb;
+  border-radius: 8px;
+  outline: none;
+  background: #fffdf8;
+  min-width: 220px;
+}
+
+/* ---- user menu ---- */
+.user {
+  position: relative;
+}
+
+.user-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.3em 0.5em 0.3em 0.35em;
+  background: transparent;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  color: #555;
+  transition: background 0.2s ease;
+}
+
+.user-trigger:hover,
+.user-trigger.open {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #eef1f7, #e3e8f2);
+  color: #6b7a9c;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.uname {
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: #444;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chevron {
+  color: #aaa;
+  transition: transform 0.2s ease;
+}
+
+.user-trigger.open .chevron {
+  transform: rotate(180deg);
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 168px;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.07);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+  z-index: 30;
+}
+
+.menu-item {
+  display: block;
+  width: 100%;
+  padding: 0.55em 0.7em;
+  font-size: 0.88rem;
+  text-align: left;
+  color: #444;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.menu-item:hover {
+  background: #f5f4f0;
+}
+
+.menu-item.danger {
+  color: #d9645a;
+}
+
+.menu-item.danger:hover {
+  background: rgba(217, 100, 90, 0.09);
+}
+
+.menu-sep {
+  height: 1px;
+  margin: 6px 4px;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 15;
+}
+
+/* ---- transitions ---- */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+.menu-enter-active,
+.menu-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.menu-enter-from,
+.menu-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
+/* ---- body ---- */
+.panes {
+  position: relative;
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.editor-column {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- left column (chapters | outline tabs) ---- */
+.left-column {
+  width: 264px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #faf8f3;
+  border-right: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.left-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 10px 12px 0;
+}
+
+.left-tab {
+  flex: 1;
+  padding: 6px 0;
+  font-size: 12.5px;
+  color: #8a8577;
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.left-tab:hover {
+  background: #f0eee7;
+  color: #444;
+}
+
+.left-tab.active {
+  background: #fff;
+  color: #444;
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.left-column > :deep(.sidebar) {
+  flex: 1;
+  min-height: 0;
+  border-right: none;
+}
+
+.left-outline {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.left-outline > :deep(.outline) {
+  flex: 1;
+  min-height: 0;
+}
+
+/* ---- right-side settings library ---- */
+.settings-column {
+  position: relative;
+  width: 224px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: #faf8f3;
+  border-left: 1px solid rgba(0, 0, 0, 0.06);
+  transition: width 0.24s ease;
+}
+
+.settings-column.collapsed {
+  width: 40px;
+}
+
+.settings-toggle {
+  position: absolute;
+  top: 10px;
+  left: 8px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  color: #8a8577;
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, transform 0.24s ease;
+}
+
+.settings-toggle:hover {
+  color: #444;
+  background: #f0efea;
+}
+
+.settings-column.collapsed .settings-toggle {
+  transform: rotate(180deg);
+}
+
 .writing-status b {
   display: inline-block;
   font-weight: 400;
@@ -1276,8 +1583,35 @@ function onReorder(ids: number[]) {
     gap: 6px;
   }
 
-  .outline-column {
+  .settings-column {
     display: none;
+  }
+
+  .left-column {
+    width: 0;
+    overflow: visible;
+  }
+
+  .left-tabs {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 41;
+    display: flex;
+    gap: 2px;
+    padding: 2px;
+    background: rgba(250, 248, 243, 0.94);
+    border-radius: 8px;
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.08);
+  }
+
+  .left-outline {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 40;
+    width: min(82vw, 300px);
+    background: #faf8f3;
+    box-shadow: 10px 0 30px rgba(0, 0, 0, 0.12);
   }
 }
 

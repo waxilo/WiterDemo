@@ -16,8 +16,6 @@ const props = defineProps<{
   currentId: number | null;
   currentWordCount: number;
   loading: boolean;
-  /** 左侧栏模式：章节列表 or 设定资料库（由 EditorView 驱动）。 */
-  mode: "chapters" | "entries";
 }>();
 const emit = defineEmits<{
   (e: "select", id: number): void;
@@ -26,7 +24,6 @@ const emit = defineEmits<{
   (e: "rename-volume", id: number, title: string): void;
   (e: "delete-volume", id: number): void;
   (e: "move-chapter", id: number, volumeId: number | null): void;
-  (e: "set-mode", mode: "chapters" | "entries"): void;
   (e: "remove", id: number): void;
   (e: "rename", id: number, title: string): void;
   (e: "duplicate", id: number): void;
@@ -437,22 +434,7 @@ function finishDrag() {
 
   <aside class="sidebar" :class="{ collapsed: isCollapsed }">
     <div class="head">
-      <div v-if="!isCollapsed" class="head-tabs">
-        <button
-          class="head-tab"
-          :class="{ active: mode === 'chapters' }"
-          @click="emit('set-mode', 'chapters')"
-        >
-          章节
-        </button>
-        <button
-          class="head-tab"
-          :class="{ active: mode === 'entries' }"
-          @click="emit('set-mode', 'entries')"
-        >
-          设定
-        </button>
-      </div>
+      <span v-if="!isCollapsed" class="label">章节</span>
       <div class="head-actions">
         <button
           v-if="!isCollapsed"
@@ -763,32 +745,6 @@ function finishDrag() {
   display: flex;
   align-items: center;
   gap: 2px;
-}
-
-.head-tabs {
-  display: flex;
-  gap: 2px;
-  padding: 2px;
-  background: #f0eee7;
-  border-radius: 8px;
-}
-
-.head-tab {
-  padding: 4px 10px;
-  font-size: 12px;
-  color: #8a8577;
-  background: transparent;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-
-.head-tab.active {
-  background: #fff;
-  color: #444;
-  font-weight: 600;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 .add {
