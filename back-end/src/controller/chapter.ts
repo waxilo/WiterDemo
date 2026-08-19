@@ -129,6 +129,16 @@ export async function searchChapters(ctx: Ctx): Promise<Response> {
   return jsonResponse(result);
 }
 
+/** Book-wide outline (heading hierarchy of every chapter). */
+export async function bookOutline(ctx: Ctx): Promise<Response> {
+  const result = await chapterService.getBookOutline(
+    ctx.env,
+    ctx.userId,
+    assertId(ctx.params.bookId, "书籍 id")
+  );
+  return jsonResponse(result);
+}
+
 interface ReplaceBody {
   from: string;
   to?: string;

@@ -28,6 +28,8 @@ export interface ChapterRow {
   char_count: number;
   /** Optimistic-lock counter, bumped on every save. */
   version: number;
+  /** Volume grouping (nullable). */
+  volume_id: number | null;
 }
 
 /** Book list item / detail returned to the client (camelCase). */
@@ -55,6 +57,84 @@ export interface ChapterSummary {
   charCount: number;
   /** Optimistic-lock counter; lets clients detect remote edits via the list. */
   version: number;
+  /** Volume grouping (nullable). */
+  volumeId: number | null;
+}
+
+/** Row shape for t_volume. */
+export interface VolumeRow {
+  id: number;
+  book_id: number;
+  title: string;
+  sort_order: number;
+  create_time: string;
+}
+
+/** Volume returned to the client. */
+export interface Volume {
+  id: number;
+  bookId: number;
+  title: string;
+  sortOrder: number;
+  /** Number of chapters in this volume (from list aggregation). */
+  chapterCount?: number;
+}
+
+/** Row shape for t_write_log. */
+export interface WriteLogRow {
+  id: number;
+  user_id: number;
+  day: string;
+  words: number;
+}
+
+/** Row shape for t_chapter_history. */
+export interface HistoryRow {
+  id: number;
+  chapter_id: number;
+  version: number;
+  title: string;
+  content: string;
+  word_count: number;
+  create_time: string;
+}
+
+/** History list item (no content). */
+export interface HistoryItem {
+  id: number;
+  version: number;
+  title: string;
+  wordCount: number;
+  createTime: string;
+}
+
+/** Row shape for t_entry (setting library: character/location/concept). */
+export interface EntryRow {
+  id: number;
+  book_id: number;
+  type: string;
+  title: string;
+  content: string;
+  sort_order: number;
+  create_time: string;
+  update_time: string;
+}
+
+/** Entry returned to the client. */
+export interface Entry {
+  id: number;
+  bookId: number;
+  type: string;
+  title: string;
+  content: string;
+  sortOrder: number;
+  updateTime: string;
+}
+
+/** Writing calendar: words written per UTC day. */
+export interface CalendarDay {
+  day: string;
+  words: number;
 }
 
 /** Chapter detail (with content). */

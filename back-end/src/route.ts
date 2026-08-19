@@ -3,6 +3,8 @@ import * as userController from "./controller/user";
 import * as bookController from "./controller/book";
 import * as chapterController from "./controller/chapter";
 import * as sessionService from "./service/SessionService";
+import * as writerController from "./controller/writer";
+import * as entryController from "./controller/entry";
 import { checkAuth } from "./middleware/auth";
 import { jsonResponse } from "./response";
 import type { Ctx } from "./context";
@@ -69,13 +71,68 @@ export async function router(ctx: Ctx): Promise<Response> {
     bookId !== undefined &&
     ID_SEGMENT.test(bookId) &&
     seg(2) === "replace";
+  const isBookOutline =
+    segments.length === 3 &&
+    seg(0) === "books" &&
+    bookId !== undefined &&
+    ID_SEGMENT.test(bookId) &&
+    seg(2) === "outline";
+  const isBookVolumes =
+    segments.length === 3 &&
+    seg(0) === "books" &&
+    bookId !== undefined &&
+    ID_SEGMENT.test(bookId) &&
+    seg(2) === "volumes";
+  const isBookEntries =
+    segments.length === 3 &&
+    seg(0) === "books" &&
+    bookId !== undefined &&
+    ID_SEGMENT.test(bookId) &&
+    seg(2) === "entries";
+  const isVolumeId =
+    segments.length === 2 &&
+    seg(0) === "volumes" &&
+    chapterId !== undefined &&
+    ID_SEGMENT.test(chapterId);
+  const isEntryId =
+    segments.length === 2 &&
+    seg(0) === "entries" &&
+    chapterId !== undefined &&
+    ID_SEGMENT.test(chapterId);
+  const isChapterVolume =
+    segments.length === 3 &&
+    seg(0) === "chapters" &&
+    chapterId !== undefined &&
+    ID_SEGMENT.test(chapterId) &&
+    seg(2) === "volume";
+  const isChapterHistory =
+    segments.length === 3 &&
+    seg(0) === "chapters" &&
+    chapterId !== undefined &&
+    ID_SEGMENT.test(chapterId) &&
+    seg(2) === "history";
+  const isChapterHistoryItem =
+    segments.length === 4 &&
+    seg(0) === "chapters" &&
+    chapterId !== undefined &&
+    ID_SEGMENT.test(chapterId) &&
+    seg(2) === "history" &&
+    seg(3) !== undefined &&
+    ID_SEGMENT.test(seg(3)!);
+  const isStatsCalendar =
+    segments.length === 2 && seg(0) === "stats" && seg(1) === "calendar";
   const isChapterId =
     segments.length === 2 &&
     seg(0) === "chapters" &&
     chapterId !== undefined &&
     ID_SEGMENT.test(chapterId);
 
-  if (!isMe && !isBooks && !isBookId && !isBookChapters && !isBookSearch && !isBookReplace && !isChapterId) {
+  if (
+    !isMe && !isBooks && !isBookId && !isBookChapters && !isBookSearch &&
+    !isBookReplace && !isBookOutline && !isBookVolumes && !isBookEntries &&
+    !isVolumeId && !isEntryId && !isChapterId && !isChapterVolume &&
+    !isChapterHistory && !isChapterHistoryItem && !isStatsCalendar
+  ) {
     return jsonResponse(null, 404, "Not Found API");
   }
 
@@ -155,11 +212,14 @@ export async function router(ctx: Ctx): Promise<Response> {
     return jsonResponse(null, 404, "Not Found API");
   }
 
-  // /books/:bookId/search (read) and /books/:bookId/replace (write)
-  if ((isBookSearch || isBookReplace) && bookId !== undefined) {
+  // /books/:bookId/search, /outline (read) and /replace (write)
+  if ((isBookSearch || isBookReplace || isBookOutline) && bookId !== undefined) {
     ctx.params.bookId = bookId;
     if (isBookSearch && method === "GET") {
       return chapterController.searchChapters(ctx);
+    }
+    if (isBookOutline && method === "GET") {
+      return chapterController.bookOutline(ctx);
     }
     if (isBookReplace && method === "POST") {
       return afterWrite(chapterController.replaceAllChapters(ctx));
@@ -173,6 +233,68 @@ export async function router(ctx: Ctx): Promise<Response> {
     if (method === "GET") return chapterController.getChapter(ctx);
     if (method === "PUT") return afterWrite(chapterController.saveChapter(ctx));
     if (method === "DELETE") return afterWrite(chapterController.deleteChapter(ctx));
+    return jsonResponse(null, 404, "Not Found API");
+  }
+
+  // /books/:bookId/volumes + /books/:bookId/entries
+  if (bookId !== undefined) {
+    if (isBookVolumes) {
+      ctx.params.bookId = bookId;
+      if (method === "GET") return writerController.listVolumes(ctx);
+      if (method === "POST") return afterWrite(writerController.createVolume(ctx));
+      return jsonResponse(null, 404, "Not Found API");
+    }
+    if (isBookEntries) {
+      ctx.params.bookId = bookId;
+      if (method === "GET") return entryController.listEntries(ctx);
+      if (method === "POST") return afterWrite(entryController.createEntry(ctx));
+      return jsonResponse(null, 404, "Not Found API");
+    }
+  }
+
+  // /volumes/:id
+  if (isVolumeId && chapterId !== undefined) {
+    ctx.params.id = chapterId;
+    if (method === "PUT") return afterWrite(writerController.renameVolume(ctx));
+    if (method === "DELETE") return afterWrite(writerController.deleteVolume(ctx));
+    return jsonResponse(null, 404, "Not Found API");
+  }
+
+  // /entries/:id
+  if (isEntryId && chapterId !== undefined) {
+    ctx.params.id = chapterId;
+    if (method === "GET") return entryController.getEntry(ctx);
+    if (method === "PUT") return afterWrite(entryController.updateEntry(ctx));
+    if (method === "DELETE") return afterWrite(entryController.deleteEntry(ctx));
+    return jsonResponse(null, 404, "Not Found API");
+  }
+
+  // /chapters/:id/volume (move), /chapters/:id/history, /chapters/:id/history/:hid
+  if (chapterId !== undefined) {
+    if (isChapterVolume) {
+      ctx.params.id = chapterId;
+      if (method === "PUT") return afterWrite(writerController.moveChapter(ctx));
+      return jsonResponse(null, 404, "Not Found API");
+    }
+    if (isChapterHistory) {
+      ctx.params.id = chapterId;
+      if (method === "GET") return writerController.chapterHistory(ctx);
+      return jsonResponse(null, 404, "Not Found API");
+    }
+    if (isChapterHistoryItem) {
+      const hid = seg(3);
+      if (hid !== undefined) {
+        ctx.params.id = chapterId;
+        ctx.params.hid = hid;
+        if (method === "GET") return writerController.historyItem(ctx);
+      }
+      return jsonResponse(null, 404, "Not Found API");
+    }
+  }
+
+  // /stats/calendar
+  if (isStatsCalendar) {
+    if (method === "GET") return writerController.writingCalendar(ctx);
     return jsonResponse(null, 404, "Not Found API");
   }
 

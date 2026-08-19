@@ -2,6 +2,7 @@ import type { Chapter, ChapterRow, ChapterSummary } from "../types";
 import { getOwnedBook } from "./BookService";
 import { ApiError } from "../errors";
 import { sha256Hex } from "../utils/token";
+import { logWords, snapshotChapter } from "./WriteLogService";
 
 export interface SaveChapterInput {
   title: string;
@@ -42,6 +43,7 @@ function toSummary(row: ChapterRow): ChapterSummary {
     wordCount: row.word_count ?? 0,
     charCount: row.char_count ?? 0,
     version: row.version,
+    volumeId: row.volume_id ?? null,
   };
 }
 
@@ -82,7 +84,7 @@ export async function listChapters(
   if (!book) throw new ApiError(403, "无权操作");
 
   const { results } = await env.DB.prepare(
-    `select id, book_id, title, sort_order, update_time, word_count, char_count, version
+    `select id, book_id, title, sort_order, update_time, word_count, char_count, version, volume_id
      from t_chapter where book_id = ? order by sort_order asc, id asc`
   )
     .bind(bookId)
@@ -185,6 +187,24 @@ export async function saveChapter(
     }
     throw new ApiError(500, "保存章节失败");
   }
+
+  // Writing activity: snapshot the previous state (version history) and
+  // record net words written today (writing calendar). Best effort — a
+  // failure here must not fail the save itself.
+  await snapshotChapter(
+    env,
+    chapterId,
+    row.version,
+    row.title,
+    row.content,
+    row.word_count ?? 0
+  ).catch(() => undefined);
+  await logWords(
+    env,
+    userId,
+    stats.wordCount - (row.word_count ?? 0)
+  ).catch(() => undefined);
+
   return toChapter(updated);
 }
 
@@ -265,6 +285,63 @@ export interface ReplaceResult {
   chapters: { id: number; title: string; replaced: number }[];
 }
 
+// --- book-wide outline -------------------------------------------------------
+
+export interface OutlineHeading {
+  level: number;
+  text: string;
+}
+
+export interface BookOutlineChapter {
+  id: number;
+  title: string;
+  headings: OutlineHeading[];
+}
+
+const OUTLINE_HEADING_PATTERN = /^(#{1,6})\s+(.+)$/;
+
+/**
+ * Extract heading lines (`#` … `######`) from chapter content. Shared by the
+ * per-chapter outline and the book-wide outline.
+ */
+export function extractHeadings(content: string): OutlineHeading[] {
+  const headings: OutlineHeading[] = [];
+  for (const line of content.split("\n")) {
+    const match = line.match(OUTLINE_HEADING_PATTERN);
+    if (match) {
+      headings.push({ level: match[1].length, text: match[2].trim() });
+    }
+  }
+  return headings;
+}
+
+/**
+ * Book-wide outline: heading hierarchy of EVERY chapter (only heading lines
+ * are transferred, never the full content). Powers the right-side navigation
+ * panel's "全书" mode.
+ */
+export async function getBookOutline(
+  env: Env,
+  userId: number,
+  bookId: number
+): Promise<{ chapters: BookOutlineChapter[] }> {
+  const book = await getOwnedBook(env, userId, bookId);
+  if (!book) throw new ApiError(403, "无权操作");
+
+  const { results } = await env.DB.prepare(
+    `select id, title, content from t_chapter where book_id = ?`
+  )
+    .bind(bookId)
+    .all<{ id: number; title: string; content: string }>();
+
+  const chapters: BookOutlineChapter[] = [];
+  for (const row of results) {
+    const headings = extractHeadings(row.content);
+    chapters.push({ id: row.id, title: row.title, headings });
+  }
+  return { chapters };
+}
+
 /** Count case-insensitive literal occurrences of `query` in `content`. */
 function countMatches(content: string, query: string): number {
   const lower = content.toLowerCase();
@@ -328,10 +405,10 @@ export async function replaceAllChapters(
   if (!book) throw new ApiError(403, "无权操作");
 
   const { results } = await env.DB.prepare(
-    `select id, title, content, version from t_chapter where book_id = ?`
+    `select id, title, content, version, word_count from t_chapter where book_id = ?`
   )
     .bind(bookId)
-    .all<{ id: number; title: string; content: string; version: number }>();
+    .all<{ id: number; title: string; content: string; version: number; word_count: number }>();
 
   let totalReplaced = 0;
   const chapters: ReplaceResult["chapters"] = [];
@@ -358,6 +435,12 @@ export async function replaceAllChapters(
       .run();
     totalReplaced += replaced;
     chapters.push({ id: row.id, title: row.title, replaced });
+    // Writing calendar: replacements add words too (net difference).
+    await logWords(
+      env,
+      userId,
+      stats.wordCount - (row.word_count ?? 0)
+    ).catch(() => undefined);
   }
   return { totalReplaced, chapters };
 }
