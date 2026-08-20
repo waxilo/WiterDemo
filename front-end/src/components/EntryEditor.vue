@@ -14,7 +14,15 @@ import LoadingIndicator from "./LoadingIndicator.vue";
  * 设定条目编辑器（表单核心）：标题 + 内容 + 防抖自动保存 + 删除。
  * 可被弹层（EntryEditDialog）或全屏视图（SettingsPanel）复用。
  */
-const props = defineProps<{ entryId: number }>();
+const props = withDefaults(
+  defineProps<{
+    entryId: number;
+    /** 是否显示"完成"按钮（弹窗模式显示；全屏铺开模式隐藏，点左侧条目切换）。
+     * 注意：Vue 对未传的布尔 prop 会规范化为 false，必须显式默认 true。 */
+    showDone?: boolean;
+  }>(),
+  { showDone: true }
+);
 
 const emit = defineEmits<{
   (e: "saved", entry: Entry): void;
@@ -225,8 +233,21 @@ async function loadEntry(id: number): Promise<void> {
   }
 }
 
+/** Ctrl/Cmd+S：立即落盘（跳过防抖），与章节编辑器一致。 */
+function onKeydown(e: KeyboardEvent): void {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+    e.preventDefault();
+    if (saveTimer !== null) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    void persist();
+  }
+}
+
 onMounted(() => {
   void loadEntry(props.entryId);
+  window.addEventListener("keydown", onKeydown);
 });
 
 // 条目切换（全屏点左侧不同条目/弹窗换条目）：先落盘旧条目挂起修改，再加载新条目。
@@ -298,6 +319,7 @@ const saveStateText = computed(() => {
 });
 
 onBeforeUnmount(() => {
+  window.removeEventListener("keydown", onKeydown);
   // 卸载前立即保存未落盘的修改，避免最后一段输入丢失。
   if (saveTimer !== null) {
     clearTimeout(saveTimer);
@@ -340,7 +362,7 @@ onBeforeUnmount(() => {
       spellcheck="false"
       @input="entry.content = ($event.target as HTMLTextAreaElement).value; onUserInput($event, 'content')"
     ></textarea>
-    <div class="entry-actions">
+    <div v-if="props.showDone" class="entry-actions">
       <button class="entry-close" @click="onDone">完成</button>
     </div>
   </template>

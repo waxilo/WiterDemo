@@ -201,6 +201,7 @@ defineExpose({ expand });
             <EntryEditor
               v-if="editingId !== null"
               :entry-id="editingId"
+              :show-done="false"
               @saved="onSaved"
               @deleted="onEditedClose(true)"
               @close="editingId = null"
