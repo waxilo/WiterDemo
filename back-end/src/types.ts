@@ -137,6 +137,8 @@ export interface CalendarDay {
 export interface Chapter extends ChapterSummary {
   content: string;
   contentHash: string | null;
+  /** 服务器权威保存基准：sha256(title+content) 整体哈希，前端据此判断是否需保存。 */
+  saveHash: string;
   createTime: string;
   /** Optimistic-lock counter; pass back as baseVersion when saving. */
   version: number;

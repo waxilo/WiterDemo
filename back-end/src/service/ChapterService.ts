@@ -2,6 +2,7 @@ import type { Chapter, ChapterRow, ChapterSummary } from "../types";
 import { getOwnedBook } from "./BookService";
 import { ApiError } from "../errors";
 import { sha256Hex } from "../utils/token";
+import { computeSaveHash } from "../utils/saveHash";
 import { snapshotChapter } from "./WriteLogService";
 
 export interface SaveChapterInput {
@@ -53,10 +54,13 @@ function toChapter(row: ChapterRow): Chapter {
     ...toSummary(row),
     content: row.content,
     contentHash: row.content_hash,
+    saveHash: "",
     createTime: row.create_time,
     version: row.version,
   };
 }
+
+
 
 /** Load a chapter row and verify the current user owns its book. */
 async function getOwnedChapterRow(
@@ -100,7 +104,10 @@ export async function getChapter(
   chapterId: number
 ): Promise<Chapter> {
   const row = await getOwnedChapterRow(env, userId, chapterId);
-  return toChapter(row);
+  return {
+    ...toChapter(row),
+    saveHash: await computeSaveHash(row.title, row.content),
+  };
 }
 
 /** Create a chapter under a book the user owns. */
@@ -122,7 +129,10 @@ export async function createChapter(
     .first<ChapterRow>();
 
   if (!row) throw new ApiError(500, "创建章节失败");
-  return toChapter(row);
+  return {
+    ...toChapter(row),
+    saveHash: await computeSaveHash(row.title, row.content),
+  };
 }
 
 /**
@@ -178,7 +188,10 @@ export async function saveChapter(
       throw new ApiError(409, "章节已在其他设备被修改", {
         version: row.version,
         updateTime: row.update_time,
-        chapter: toChapter(row),
+        chapter: {
+          ...toChapter(row),
+          saveHash: await computeSaveHash(row.title, row.content),
+        },
       });
     }
     // Legacy path: pre-check update_time (best effort, second precision).
@@ -189,7 +202,10 @@ export async function saveChapter(
       throw new ApiError(409, "章节已在其他设备被修改", {
         version: row.version,
         updateTime: row.update_time,
-        chapter: toChapter(row),
+        chapter: {
+          ...toChapter(row),
+          saveHash: await computeSaveHash(row.title, row.content),
+        },
       });
     }
     throw new ApiError(500, "保存章节失败");
@@ -207,7 +223,10 @@ export async function saveChapter(
     row.word_count ?? 0
   ).catch(() => undefined);
 
-  return toChapter(updated);
+  return {
+    ...toChapter(updated),
+    saveHash: await computeSaveHash(nextTitle, nextContent),
+  };
 }
 
 /**

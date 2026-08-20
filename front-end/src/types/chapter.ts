@@ -19,6 +19,8 @@ export interface ChapterSummary {
 export interface Chapter extends ChapterSummary {
   content: string;
   contentHash: string | null;
+  /** 服务器权威保存基准：sha256(title+content) 整体哈希。 */
+  saveHash: string;
   createTime: string;
   /** Optimistic-lock counter, bumped on every server save. */
   version: number;

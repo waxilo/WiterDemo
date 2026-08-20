@@ -1,5 +1,4 @@
 import { ref, computed, watch } from "vue";
-import SparkMD5 from "spark-md5";
 import * as chapterApi from "../api/chapter";
 import { syncRequest, ApiClientError } from "../api/http";
 import { showToast } from "./useToast";
@@ -8,9 +7,21 @@ import { AUTOSAVE_IDLE_MS } from "../config";
 import { getTextStats } from "../utils/textStats";
 import { useBusy } from "./useBusy";
 
-/** Client-side dirty marker: md5 of the JSON {title, content}. */
-function hashOf(title: string, content: string): string {
-  return SparkMD5.hash(JSON.stringify({ title, content }));
+/** 当前内容整体 hash（sha256(title + "\x00" + content)），与后端 saveHash 同一算法
+ * （见 back-end/src/utils/saveHash.ts）。分隔符拼接避免字段顺序漂移。
+ * 非安全上下文（如 http://IP 访问）无 crypto.subtle：返回 null，由同步字段比较兜底。 */
+async function computeHash(
+  title: string,
+  content: string
+): Promise<string | null> {
+  if (!globalThis.crypto?.subtle) return null;
+  const buf = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`${title}\x00${content}`)
+  );
+  return [...new Uint8Array(buf)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 function toSummary(chapter: Chapter): ChapterSummary {
@@ -38,7 +49,10 @@ export function useChapters() {
   const saving = ref(false);
   /** Message of the last failed save (cleared on the next successful save). */
   const saveError = ref<string | null>(null);
-  const savedHash = ref<string | null>(null);
+  /** 服务器权威保存基准：后端返回的整体 hash（title+content）。 */
+  const saveHash = ref("");
+  /** 当前内容的整体 hash（异步计算；null = 尚未就绪）。 */
+  const currentHash = ref<string | null>(null);
   /** 章节级操作等待态（打开/新建），驱动左侧列表的等待覆盖层。 */
   const { busy: selecting, run: runChapterOp } = useBusy();
 
@@ -53,14 +67,31 @@ export function useChapters() {
   /** Guards the immediate post-conflict retry against infinite loops. */
   let conflictRetryInFlight = false;
 
-  function currentHash(): string {
-    if (!current.value) return "";
-    return hashOf(current.value.title, current.value.content);
-  }
-
-  const dirty = computed(
-    () => current.value !== null && currentHash() !== savedHash.value
+  // 内容变化时异步重算当前 hash（快速输入时丢弃过期结果）。
+  watch(
+    [() => current.value?.title, () => current.value?.content],
+    async () => {
+      const c = current.value;
+      if (!c) {
+        currentHash.value = null;
+        return;
+      }
+      const h = await computeHash(c.title, c.content);
+      if (current.value === c) currentHash.value = h;
+    },
+    { immediate: true }
   );
+
+  const dirty = computed(() => {
+    if (!current.value) return false;
+    if (currentHash.value !== null) {
+      return currentHash.value !== saveHash.value;
+    }
+    // hash 未就绪（异步计算中）：同步字段比较兜底，输入后立即显示未保存。
+    return (
+      current.value.title !== baseTitle || current.value.content !== baseContent
+    );
+  });
 
   /**
    * The sidebar and the editor show the SAME chapter title. Whenever the
@@ -91,7 +122,8 @@ export function useChapters() {
     saveQueued = false;
     list.value = [];
     current.value = null;
-    savedHash.value = null;
+    saveHash.value = "";
+    currentHash.value = null;
     baseTitle = "";
     baseContent = "";
     saveError.value = null;
@@ -116,8 +148,9 @@ export function useChapters() {
       await flush();
       const chapter = await chapterApi.getChapter(id);
       current.value = chapter;
-      // Seed savedHash from the loaded content so it starts "clean".
-      savedHash.value = hashOf(chapter.title, chapter.content);
+      // 服务器权威基准：后端返回的整体 hash（打开即干净）。
+      saveHash.value = chapter.saveHash;
+      currentHash.value = null;
       mergeRetries = 0;
       baseTitle = chapter.title;
       baseContent = chapter.content;
@@ -130,7 +163,8 @@ export function useChapters() {
       const chapter = await chapterApi.createChapter(bookId);
       list.value.push(toSummary(chapter));
       current.value = chapter;
-      savedHash.value = hashOf(chapter.title, chapter.content);
+      saveHash.value = chapter.saveHash;
+      currentHash.value = null;
       mergeRetries = 0;
       baseTitle = chapter.title;
       baseContent = chapter.content;
@@ -142,8 +176,13 @@ export function useChapters() {
     const chapter = current.value;
     if (!chapter) return;
 
-    const hash = currentHash();
-    if (hash === savedHash.value) return; // no change
+    // 服务器权威对比：本地内容 hash 与后端上次返回的 saveHash 不同才保存。
+    // hash 未就绪（异步计算中）时用同步字段比较兜底，避免快速操作被跳过。
+    if (currentHash.value !== null) {
+      if (currentHash.value === saveHash.value) return;
+    } else if (chapter.title === baseTitle && chapter.content === baseContent) {
+      return;
+    }
     // 字段级 patch：只发送实际变化的字段，避免覆盖其他设备（如 MCP）的写入。
     const patch: { title?: string; content?: string } = {};
     if (chapter.title !== baseTitle) patch.title = chapter.title;
@@ -162,10 +201,18 @@ export function useChapters() {
         ...patch,
         baseVersion: chapter.version,
       });
-      savedHash.value = hash;
+      saveHash.value = saved.saveHash;
       mergeRetries = 0;
       baseTitle = saved.title;
       baseContent = saved.content;
+      // 发送后未继续修改的字段写回规范化回显（如标题 trim），
+      // 否则本地 hash 与服务器 saveHash 永久不同导致循环保存。
+      if (patch.title !== undefined && chapter.title === patch.title) {
+        chapter.title = saved.title;
+      }
+      if (patch.content !== undefined && chapter.content === patch.content) {
+        chapter.content = saved.content;
+      }
       chapter.updateTime = saved.updateTime;
       chapter.version = saved.version;
       chapter.contentHash = saved.contentHash;
@@ -204,6 +251,9 @@ export function useChapters() {
             mergeRetries++;
             baseTitle = server.title;
             baseContent = server.content;
+            // 服务器当前基准：合并后本地脏字段未落盘，hash 对比仍为脏 → 重试保存。
+            saveHash.value = server.saveHash;
+            currentHash.value = null;
             chapter.version = server.version;
             chapter.title =
               patch.title !== undefined ? chapter.title : server.title;
@@ -281,7 +331,8 @@ export function useChapters() {
   function applyServerChapter(chapter: Chapter): void {
     if (current.value?.id !== chapter.id) return;
     current.value = chapter;
-    savedHash.value = hashOf(chapter.title, chapter.content);
+    saveHash.value = chapter.saveHash;
+    currentHash.value = null;
     baseTitle = chapter.title;
     baseContent = chapter.content;
     saveError.value = null;
@@ -294,8 +345,8 @@ export function useChapters() {
   function flushSync(): void {
     const chapter = current.value;
     if (!chapter) return;
-    const hash = currentHash();
-    if (hash === savedHash.value) return;
+    // 同步字段比较：hash 是异步计算的，关页面前可能未就绪，不能作为依据。
+    if (chapter.title === baseTitle && chapter.content === baseContent) return;
     syncRequest("PUT", `/chapters/${chapter.id}`, {
       title: chapter.title,
       content: chapter.content,
@@ -308,7 +359,8 @@ export function useChapters() {
     list.value = list.value.filter((c) => c.id !== id);
     if (current.value?.id === id) {
       current.value = null;
-      savedHash.value = null;
+      saveHash.value = "";
+      currentHash.value = null;
       baseTitle = "";
       baseContent = "";
     }
@@ -364,7 +416,8 @@ export function useChapters() {
       const orderedIds = list.value.map((chapter) => chapter.id);
       list.value = await chapterApi.reorderChapters(source.bookId, orderedIds);
       current.value = copied;
-      savedHash.value = hashOf(copied.title, copied.content);
+      saveHash.value = copied.saveHash;
+      currentHash.value = null;
       baseTitle = copied.title;
       baseContent = copied.content;
     } catch (error) {
