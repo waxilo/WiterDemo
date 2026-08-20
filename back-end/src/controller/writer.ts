@@ -93,10 +93,3 @@ export async function historyItem(ctx: Ctx): Promise<Response> {
   });
 }
 
-/** Writing calendar (words per day). */
-export async function writingCalendar(ctx: Ctx): Promise<Response> {
-  const daysParam = ctx.url.searchParams.get("days") ?? "365";
-  const days = Math.min(Math.max(Number(daysParam) || 365, 7), 365);
-  const result = await writeLogService.getCalendar(ctx.env, ctx.userId, days);
-  return jsonResponse(result);
-}

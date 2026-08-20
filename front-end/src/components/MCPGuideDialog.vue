@@ -9,7 +9,7 @@ import CodeBlock from "./CodeBlock.vue";
 const emit = defineEmits<{ (e: "close"): void }>();
 
 // 全局安装（网络受限环境推荐：npx 每次运行需访问 registry，全局安装只装一次）
-const INSTALL_CODE = "npm install -g writer-demo-mcp";
+const INSTALL_CODE = "npm install -g writer-demo-mcp@latest";
 const LOGIN_CODE = "writer-demo-mcp login";
 const CLAUDE_CONFIG = `{
   "mcpServers": {
@@ -40,8 +40,8 @@ args: （留空）`;
       <h4 class="guide-step">① 全局安装（在电脑终端执行）</h4>
       <CodeBlock :code="INSTALL_CODE" single />
       <p class="guide-note">
-        更新到最新版执行：<code>npm install -g writer-demo-mcp@latest</code>。
-        server 启动时会自动检查 npm 是否有新版本并提示更新。
+        重复执行同一条命令即可升级到最新版；server 启动时会自动检查 npm
+        是否有新版本并提示更新。
       </p>
       <p class="guide-note">
         网络较差的场景：安装时会拉取 npm registry，只需成功一次即可离线运行；

@@ -81,12 +81,6 @@ export interface Volume {
 }
 
 /** Row shape for t_write_log. */
-export interface WriteLogRow {
-  id: number;
-  user_id: number;
-  day: string;
-  words: number;
-}
 
 /** Row shape for t_chapter_history. */
 export interface HistoryRow {

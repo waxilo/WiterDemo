@@ -3,7 +3,6 @@ import type {
   Volume,
   HistoryItem,
   HistoryDetail,
-  CalendarDay,
   Entry,
   EntryType,
 } from "../types/writer";
@@ -57,13 +56,6 @@ export function getHistoryItem(
   });
 }
 
-// --- writing calendar --------------------------------------------------------
-
-export function getWritingCalendar(days = 365): Promise<CalendarDay[]> {
-  return request<CalendarDay[]>(`/stats/calendar?days=${days}`, {
-    method: "GET",
-  });
-}
 
 // --- setting library (entries) -----------------------------------------------
 

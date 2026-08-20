@@ -2,7 +2,6 @@
 import { onMounted, onUnmounted, ref, computed } from "vue";
 import type { useBooks } from "../composables/useBooks";
 import BookCard from "../components/BookCard.vue";
-import WritingCalendar from "../components/WritingCalendar.vue";
 import LoadingIndicator from "../components/LoadingIndicator.vue";
 import MCPGuideDialog from "../components/MCPGuideDialog.vue";
 import ChangePasswordDialog from "../components/ChangePasswordDialog.vue";
@@ -162,7 +161,6 @@ function onEsc(e: KeyboardEvent) {
         </Transition>
       </div>
 
-      <WritingCalendar />
     </main>
   </div>
 </template>

@@ -121,8 +121,6 @@ export async function router(ctx: Ctx): Promise<Response> {
     seg(2) === "history" &&
     seg(3) !== undefined &&
     ID_SEGMENT.test(seg(3)!);
-  const isStatsCalendar =
-    segments.length === 2 && seg(0) === "stats" && seg(1) === "calendar";
   const isChapterId =
     segments.length === 2 &&
     seg(0) === "chapters" &&
@@ -133,8 +131,7 @@ export async function router(ctx: Ctx): Promise<Response> {
     !isMe && !isMePassword && !isBooks && !isBookId && !isBookChapters &&
     !isBookSearch && !isBookReplace && !isBookOutline && !isBookVolumes &&
     !isBookEntries && !isVolumeId && !isEntryId && !isChapterId &&
-    !isChapterVolume && !isChapterHistory && !isChapterHistoryItem &&
-    !isStatsCalendar
+    !isChapterVolume && !isChapterHistory && !isChapterHistoryItem
   ) {
     return jsonResponse(null, 404, "Not Found API");
   }
@@ -284,12 +281,6 @@ export async function router(ctx: Ctx): Promise<Response> {
       }
       return jsonResponse(null, 404, "Not Found API");
     }
-  }
-
-  // /stats/calendar
-  if (isStatsCalendar) {
-    if (method === "GET") return writerController.writingCalendar(ctx);
-    return jsonResponse(null, 404, "Not Found API");
   }
 
   return jsonResponse(null, 404, "Not Found API");

@@ -2,7 +2,7 @@ import type { Chapter, ChapterRow, ChapterSummary } from "../types";
 import { getOwnedBook } from "./BookService";
 import { ApiError } from "../errors";
 import { sha256Hex } from "../utils/token";
-import { logWords, snapshotChapter } from "./WriteLogService";
+import { snapshotChapter } from "./WriteLogService";
 
 export interface SaveChapterInput {
   /** 缺省表示不修改该字段（字段级保存：只更新实际修改的部分）。 */
@@ -205,11 +205,6 @@ export async function saveChapter(
     row.title,
     row.content,
     row.word_count ?? 0
-  ).catch(() => undefined);
-  await logWords(
-    env,
-    userId,
-    stats.wordCount - (row.word_count ?? 0)
   ).catch(() => undefined);
 
   return toChapter(updated);
@@ -442,12 +437,6 @@ export async function replaceAllChapters(
       .run();
     totalReplaced += replaced;
     chapters.push({ id: row.id, title: row.title, replaced });
-    // Writing calendar: replacements add words too (net difference).
-    await logWords(
-      env,
-      userId,
-      stats.wordCount - (row.word_count ?? 0)
-    ).catch(() => undefined);
   }
   return { totalReplaced, chapters };
 }

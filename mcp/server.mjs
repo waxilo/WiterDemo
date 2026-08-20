@@ -9,7 +9,6 @@
 //   writer-demo-mcp login     交互登录并保存凭证
 
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { createInterface } from "node:readline";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 
@@ -21,17 +20,49 @@ const VERSION = "0.1.1";
 
 // --- `login` subcommand -------------------------------------------------------
 
+/**
+ * 行输入（终端 raw 模式手动读取）。`hidden` 时密码不回显（显示 *）。
+ * 相比 readline 更可靠：readline 的回显走内部路径，无法可靠拦截。
+ */
+function askLine(question, hidden = false) {
+  return new Promise((resolve) => {
+    const stdin = process.stdin;
+    process.stdout.write(question + " ");
+    if (stdin.isTTY) stdin.setRawMode(true);
+    let value = "";
+    const onData = (chunk) => {
+      for (const ch of chunk.toString()) {
+        if (ch === "\n" || ch === "\r" || ch === "\x04") {
+          stdin.removeListener("data", onData);
+          if (stdin.isTTY) stdin.setRawMode(false);
+          process.stdout.write("\n");
+          resolve(value);
+          return;
+        }
+        if (ch === "\x03") {
+          // Ctrl+C：raw 模式下信号被禁用，手动退出。
+          process.exit(130);
+        }
+        if (ch === "\x7f" || ch === "\b") {
+          // 退格：删除最后一个字符（不回显占位符）。
+          if (value.length > 0) value = value.slice(0, -1);
+          continue;
+        }
+        value += ch;
+        process.stdout.write(hidden ? "*" : ch);
+      }
+    };
+    stdin.on("data", onData);
+  });
+}
+
 async function runLogin() {
   let username = "";
   let password = "";
 
   if (process.stdin.isTTY) {
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
-    const ask = (question) =>
-      new Promise((resolve) => rl.question(question, resolve));
-    username = await ask("账号: ");
-    password = await ask("密码: ");
-    rl.close();
+    username = await askLine("账号: ", false);
+    password = await askLine("密码: ", true);
   } else {
     const lines = readFileSync(0, "utf8").split("\n");
     username = lines[0]?.trim() ?? "";

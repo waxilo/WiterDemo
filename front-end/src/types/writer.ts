@@ -28,11 +28,6 @@ export interface HistoryDetail {
 }
 
 /** 写作日历：某天写了多少字（UTC 日期）。 */
-export interface CalendarDay {
-  day: string;
-  words: number;
-}
-
 /** 设定资料库条目类型。 */
 export type EntryType = "character" | "location" | "concept";
 

@@ -1,52 +1,10 @@
-// Writing activity helpers: daily word log (heatmap) and chapter history
-// snapshots. Both are hooked into saveChapter/replaceAllChapters.
+// Chapter version-history snapshots, hooked into saveChapter/replaceAllChapters.
 
 import type { HistoryItem, HistoryRow } from "../types";
 import { ApiError } from "../errors";
 
 /** Number of history snapshots kept per chapter (oldest dropped first). */
 const HISTORY_LIMIT = 5;
-
-/** UTC day key (YYYY-MM-DD) for the writing calendar. */
-function utcDayKey(now = new Date()): string {
-  return now.toISOString().slice(0, 10);
-}
-
-/**
- * Record words written today (delta must be positive). Upsert by (user, day).
- */
-export async function logWords(
-  env: Env,
-  userId: number,
-  deltaWords: number
-): Promise<void> {
-  if (!Number.isFinite(deltaWords) || deltaWords <= 0) return;
-  await env.DB.prepare(
-    `insert into t_write_log (user_id, day, words) values (?, ?, ?)
-     on conflict(user_id, day) do update set words = words + excluded.words`
-  )
-    .bind(userId, utcDayKey(), Math.round(deltaWords))
-    .run();
-}
-
-/** Words written per day over the last `days` days (only non-zero days). */
-export async function getCalendar(
-  env: Env,
-  userId: number,
-  days: number
-): Promise<{ day: string; words: number }[]> {
-  const since = new Date(Date.now() - days * 86_400_000)
-    .toISOString()
-    .slice(0, 10);
-  const { results } = await env.DB.prepare(
-    `select day, words from t_write_log
-     where user_id = ? and day >= ? and words > 0
-     order by day asc`
-  )
-    .bind(userId, since)
-    .all<{ day: string; words: number }>();
-  return results;
-}
 
 /**
  * Snapshot the PREVIOUS state of a chapter before it is overwritten, and
