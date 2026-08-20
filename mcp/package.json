@@ -1,6 +1,6 @@
 {
   "name": "writer-demo-mcp",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "WriterDemo 写作助手 MCP server：让 Claude Desktop / Cursor 等 AI 客户端读写章节正文与设定资料库（人物/地点/设定）",
   "engines": {

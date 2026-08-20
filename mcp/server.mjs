@@ -16,7 +16,7 @@ const CONFIG_PATH =
   process.env.WRITER_MCP_CONFIG || join(homedir(), ".writer-mcp.json");
 const DEFAULT_API_BASE = "https://api.sloan.dpdns.org";
 /** 发布到 npm 的当前版本（发布时同步更新）。 */
-const VERSION = "0.1.1";
+const VERSION = "0.1.2";
 
 // --- `login` subcommand -------------------------------------------------------
 
